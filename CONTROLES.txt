@@ -1,0 +1,69 @@
+HOOP STARS - basquete 1 contra 1
+================================
+
+Como jogar: abra HoopStars.exe. Nao precisa instalar nada, nem ter Python.
+(O Windows pode mostrar um aviso de "editor desconhecido" por o arquivo nao
+ser assinado digitalmente. E so clicar em "Mais informacoes" > "Executar
+assim mesmo".)
+
+
+CONTROLES
+---------
+
+                        JOGADOR 1          JOGADOR 2
+  mover                 A   D              seta esq / dir
+  pular / dar toco      W                  seta cima
+  acao                  ESPACO             ENTER
+  modificador           S                  seta baixo
+  MODO                  Q                  SHIFT direito
+
+
+COM A BOLA
+  segure a acao ................ arremesso
+  2x acao perto do aro ......... enterrada
+  modificador + acao ........... finta (longe) / bandeja (perto)
+  2x a mesma direcao ........... arranque
+
+SEM A BOLA
+  cima ......................... toco
+  1x acao ...................... bote de roubo
+  2x a mesma direcao ........... arranque
+
+
+O MEDIDOR DE ARREMESSO
+----------------------
+Segure a acao e um arco aparece sobre a cabeca do jogador. Solte na faixa
+VERDE e a bola entra. Amarelo cai as vezes; vermelho quase nunca.
+
+A zona verde e diferente pra cada um, e ela ENCOLHE com a distancia e com o
+defensor em cima. Um pivo chutando de tres nao tem zona verde nenhuma - e a
+barra avisando que dali nao existe arremesso garantido.
+
+
+O MODO
+------
+O medidor embaixo do nome enche jogando: cesta, roubo, toco (e um pouco
+quando voce leva cesta). Cheio, ele pisca em dourado - aperte Q (ou SHIFT
+direito) pra ligar o traco do seu jogador no exagero por alguns segundos.
+
+Cada personagem tem o seu; a tela de escolha diz qual. O do Shaq arrebenta a
+tabela.
+
+
+OUTRAS TECLAS
+-------------
+  F11 (ou F) .... tela cheia
+  P ............. pausa
+  M ............. liga/desliga o som
+  R ............. revanche (mesma dupla, mesma quadra)
+  ESC ........... volta uma tela / sai
+
+
+REGRAS
+------
+Primeiro a chegar nos pontos escolhidos (7, 11, 15 ou 21) vence. Cesta de
+dentro vale 2, de fora da linha de 3 vale 3, e bola limpa (sem tocar no aro)
+vale 1 a mais.
+
+Errou o arremesso? Quem pegar o rebote precisa levar a bola pra tras da linha
+de 3 antes de atacar.
