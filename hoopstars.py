@@ -1639,6 +1639,10 @@ class Crowd:
         self.t = 0
         self.flashes = []
         self.people = []
+        # cache SÓ no navegador: ver `draw`
+        self._cache = None
+        self._cache_t = -999
+        self._festa = 0
         n = q["fileiras"]
         em_pe = q["publico"] == "em pe"
         for row in range(n):
@@ -1651,6 +1655,11 @@ class Crowd:
                 y = stand_row_y(row, n)
                 esc = stand_row_scale(row)
             passo = max(9, int(q["passo"] * esc))
+            if NO_NAVEGADOR:
+                # mais espaçada: menos gente na MESMA área. O público é cenário
+                # a 400 px de distância — ninguém conta cabeça, e cada pessoa é
+                # uma travessia Python->WASM a cada repinte do cache.
+                passo = int(passo * 1.6)
             for x in range(-12, WIDTH + 24, passo):
                 p = Spectator()
                 # na rua a galera se junta em grupos, não em fila regular
@@ -1669,6 +1678,9 @@ class Crowd:
                 self.people.append(p)
 
     def cheer(self, origin_x, strength=1.0):
+        # enquanto isto durar a arquibancada é refeita todo quadro: as pessoas
+        # pulam de verdade, e aí congelar apareceria
+        self._festa = 120
         for p in self.people:
             atraso = int(abs(p.x - origin_x) / self.WAVE_PX_POR_FRAME)
             p.delay = atraso
@@ -1704,8 +1716,33 @@ class Crowd:
                 f[3] -= 1
                 vivos.append(f)
         self.flashes = vivos
+        if self._festa > 0:
+            self._festa -= 1
+
+    # De quantos em quantos quadros a imagem da torcida é refeita no
+    # navegador. Só lá: no PC medi este mesmo cache deixando 11% mais LENTO,
+    # porque o blit de tela cheia com alfa custa mais que os blits poupados.
+    # No navegador o que pesa é a travessia Python->WASM, e 524 chamadas viram
+    # uma. Mesmo código, resposta oposta conforme onde roda.
+    PASSO_CACHE = 4
 
     def draw(self, surface):
+        if not NO_NAVEGADOR:
+            return self._pintar(surface)
+        passo = 1 if self._festa > 0 else self.PASSO_CACHE
+        if self._cache is None or self.t - self._cache_t >= passo:
+            if self._cache is None:
+                self._cache = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            self._cache.fill((0, 0, 0, 0))
+            self._pintar(self._cache, flashes=False)
+            self._cache_t = self.t
+        surface.blit(self._cache, (0, 0))
+        # os flashes ficam FORA do cache: duram poucos quadros e pipocam em
+        # lugares diferentes, então congelar um por três quadros o transformaria
+        # de faísca em lâmpada
+        self._flashes(surface)
+
+    def _pintar(self, surface, flashes=True):
         t = self.t
         for p in self.people:
             comemorando = p.timer > 0 and p.delay <= 0
@@ -1720,6 +1757,10 @@ class Crowd:
                 vel = 0.42 if comemorando else 0.12
                 fl = FLAG_SPRITES[p.row][p.flag][int(t * vel + p.phase * 2) % 4]
                 surface.blit(fl, (p.x + w // 3, y - fl.get_height() // 2))
+        if flashes:
+            self._flashes(surface)
+
+    def _flashes(self, surface):
         for fx, fy, espera, vida in self.flashes:
             if espera <= 0 and vida > 0:
                 r = 2 + vida // 2
@@ -1788,8 +1829,11 @@ class Net:
     empurra um barbante, ela estufa a circunferência inteira naquela altura.
     """
 
-    STRANDS = 12             # nós em volta do anel
-    ROWS = 9                 # anéis ao longo do comprimento
+    # 12 x 9 dão 192 segmentos por quadro. No navegador cada segmento é uma
+    # travessia Python->WASM, então a malha afina pra 8 x 6 = 80. Mais grossa,
+    # ainda legível como losango — e isso num aro de 66 px de largura.
+    STRANDS = 8 if NO_NAVEGADOR else 12      # nós em volta do anel
+    ROWS = 6 if NO_NAVEGADOR else 9          # anéis ao longo do comprimento
     # o comprimento da rede é próximo do diâmetro do aro, como na de verdade
     LENGTH = 54
     TOP_R = (RIM_RIGHT - RIM_LEFT) / 2.0
