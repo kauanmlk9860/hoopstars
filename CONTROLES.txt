@@ -53,6 +53,8 @@ tabela.
 OUTRAS TECLAS
 -------------
   F11 (ou F) .... tela cheia
+  F3 ............ mostra o custo do quadro (pra saber se o jogo esta
+                  lento na sua maquina, ou so parece)
   P ............. pausa
   M ............. liga/desliga o som
   R ............. revanche (mesma dupla, mesma quadra)

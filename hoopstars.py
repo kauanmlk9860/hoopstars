@@ -794,7 +794,7 @@ class Som:
                       for nome, receita, vol, vozes, esticar in self.RECEITAS
                       for _ in range(vozes)]
 
-    def preparar(self, orcamento_ms=9.0):
+    def preparar(self, orcamento_ms=3.0 if NO_NAVEGADOR else 9.0):
         """Monta parte do banco e devolve True quando acabou.
 
         Sintetizar tudo no import custaria quase um segundo de tela preta antes
@@ -1639,9 +1639,8 @@ class Crowd:
         self.t = 0
         self.flashes = []
         self.people = []
-        # cache SÓ no navegador: ver `draw`
-        self._cache = None
-        self._cache_t = -999
+        # enquanto isto durar a galera pula de verdade, e o cenário precisa ser
+        # recomposto mais vezes: ver `Game._fundo_composto`
         self._festa = 0
         n = q["fileiras"]
         em_pe = q["publico"] == "em pe"
@@ -1678,8 +1677,8 @@ class Crowd:
                 self.people.append(p)
 
     def cheer(self, origin_x, strength=1.0):
-        # enquanto isto durar a arquibancada é refeita todo quadro: as pessoas
-        # pulam de verdade, e aí congelar apareceria
+        # as pessoas passam a pular de verdade: enquanto isso durar, congelar o
+        # cenário por quatro quadros apareceria
         self._festa = 120
         for p in self.people:
             atraso = int(abs(p.x - origin_x) / self.WAVE_PX_POR_FRAME)
@@ -1719,28 +1718,15 @@ class Crowd:
         if self._festa > 0:
             self._festa -= 1
 
-    # De quantos em quantos quadros a imagem da torcida é refeita no
-    # navegador. Só lá: no PC medi este mesmo cache deixando 11% mais LENTO,
-    # porque o blit de tela cheia com alfa custa mais que os blits poupados.
-    # No navegador o que pesa é a travessia Python->WASM, e 524 chamadas viram
-    # uma. Mesmo código, resposta oposta conforme onde roda.
-    PASSO_CACHE = 4
-
     def draw(self, surface):
-        if not NO_NAVEGADOR:
-            return self._pintar(surface)
-        passo = 1 if self._festa > 0 else self.PASSO_CACHE
-        if self._cache is None or self.t - self._cache_t >= passo:
-            if self._cache is None:
-                self._cache = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            self._cache.fill((0, 0, 0, 0))
-            self._pintar(self._cache, flashes=False)
-            self._cache_t = self.t
-        surface.blit(self._cache, (0, 0))
-        # os flashes ficam FORA do cache: duram poucos quadros e pipocam em
-        # lugares diferentes, então congelar um por três quadros o transformaria
-        # de faísca em lâmpada
-        self._flashes(surface)
+        """A torcida pintada direto na superfície que vier.
+
+        No navegador quem chama isto é o cache do CENÁRIO (ver
+        `Game._fundo_composto`), que compõe fundo, público, alambrado e
+        refletor numa imagem opaca só. A torcida não guarda mais cache
+        próprio: o dela deixava de pé justamente a metade cara da conta, uma
+        blit de tela cheia COM ALFA a cada quadro."""
+        return self._pintar(surface)
 
     def _pintar(self, surface, flashes=True):
         t = self.t
@@ -1867,6 +1853,11 @@ class Net:
         self.onda_r = 0.0
         self._tela = pygame.Surface(
             (self.CAIXA.w * self.SS, self.CAIXA.h * self.SS), pygame.SRCALPHA)
+        # a imagem pronta do ultimo quadro, e em que condicoes ela foi feita
+        self._pronta = None
+        self._pronta_parada = False
+        self._pronta_flex = None
+        self.parado = True
 
     # ------------------------------------------------------------------ forma
     def _raio(self, t):
@@ -1973,6 +1964,9 @@ class Net:
 
         bulge0 = list(self.bulge)
         sag0 = list(self.sag)
+        # o maior deslocamento de qualquer no: e o que diz se a rede ainda tem
+        # o que mostrar ou se ja assentou
+        mexe = 0.0
         for r in range(self.ROWS):
             if r == 0:
                 # a boca de cima é amarrada no aro: não abre nem desce
@@ -1999,6 +1993,11 @@ class Net:
                 self.jv[r][i] *= 0.84
                 self.jit[r][i] = max(-4.0, min(4.0,
                                                self.jit[r][i] + self.jv[r][i]))
+            mexe = max(mexe, abs(self.bulge[r]), abs(self.sag[r]),
+                       max(map(abs, self.jit[r])))
+        # meio decimo de pixel: abaixo disso o desenho novo cai nos mesmos
+        # pixels do antigo, entao nao ha o que redesenhar
+        self.parado = self.onda <= 0.0 and mexe < 0.05
 
     # ---------------------------------------------------------------- desenho
     def _nos(self, flex):
@@ -2055,6 +2054,10 @@ class Net:
         return segs
 
     def draw(self, surface, flex=0.0):
+        if (self._pronta is not None and self.parado and self._pronta_parada
+                and flex == self._pronta_flex):
+            surface.blit(self._pronta, self.CAIXA.topleft)
+            return
         segs = self._ligacoes(flex)
         # do fundo pra frente: quem está do lado de cá tapa quem está do lado
         # de lá, que é o que dá volume ao tubo
@@ -2071,11 +2074,13 @@ class Net:
             linha(tela, cor, ((ax - ox) * ss, (ay - oy) * ss),
                   ((bx - ox) * ss, (by - oy) * ss),
                   grosso if z > -0.15 else fino)
-        if ss == 1:
-            surface.blit(tela, self.CAIXA.topleft)
-        else:
-            surface.blit(pygame.transform.smoothscale(tela, self.CAIXA.size),
-                         self.CAIXA.topleft)
+        # guardada no tamanho FINAL: com SUPER ligado, reduzir de novo no
+        # quadro seguinte custaria quase tanto quanto redesenhar
+        self._pronta = (tela if ss == 1 else
+                        pygame.transform.smoothscale(tela, self.CAIXA.size))
+        self._pronta_parada = self.parado
+        self._pronta_flex = flex
+        surface.blit(self._pronta, self.CAIXA.topleft)
 
 
 # --------------------------------------------------------------------------
@@ -3458,10 +3463,24 @@ class Player:
     # caixa da cravada em cada quadro de caminhada.
     CAIXA_TOPO_BAIXO = -147
 
+    # De quantos em quantos quadros a camada do personagem e refeita no
+    # navegador. So la: no PC o caminho supersampleado cabe no orcamento.
+    PASSO_CAMADA = 3
+
+    def pose_chave(self, holding_ball, dy, alt):
+        """O que, mudando, exige redesenhar a camada na hora.
+
+        Sao as mudancas de NATUREZA da pose. O avanco continuo da animacao nao
+        entra: e justamente ele que pode esperar alguns quadros. Sem isto, o
+        personagem arremessaria com a pose de quem esta parado."""
+        return (self.state, self.action, self.facing, bool(holding_ball),
+                self.dribbling, self.suspended, self.aiming, self.charging,
+                self.sprint > 0, self.super_frames > 0, dy, alt)
+
     def draw(self, surface, holding_ball):
         """Monta o personagem numa camada ampliada e a reduz sobre a tela."""
         if self.SUPER <= 1:
-            self.montar(Pincel(surface), holding_ball)
+            self.draw_camada(surface, holding_ball)
             return
         dx, dy, larg, sobra = self.CAIXA
         if not (self.action or self.jumping or self.suspended or self.aiming):
@@ -3473,6 +3492,34 @@ class Player:
         camada = pygame.Surface((larg * k, alt * k), pygame.SRCALPHA)
         self.montar(Pincel(camada, k, x0, y0), holding_ball)
         surface.blit(pygame.transform.smoothscale(camada, (larg, alt)), (x0, y0))
+
+    def draw_camada(self, surface, holding_ball):
+        """Desenha o personagem numa camada 1x e a reaproveita por alguns
+        quadros. A camada e colada na posicao ATUAL a cada quadro, entao o
+        movimento continua liso -- o que roda mais devagar e so a animacao dos
+        membros."""
+        dx, dy, larg, sobra = self.CAIXA
+        if not (self.action or self.jumping or self.suspended or self.aiming):
+            dy = self.CAIXA_TOPO_BAIXO
+        x0 = int(self.x + dx)
+        y0 = int(self.y - self.jump_offset + dy)
+        alt = int(self.y + sobra) - y0
+        chave = self.pose_chave(holding_ball, dy, alt)
+        idade = self.anim_t - getattr(self, "_camada_t", -999)
+        if (getattr(self, "_camada", None) is None
+                or getattr(self, "_camada_chave", None) != chave
+                or idade >= self.PASSO_CAMADA):
+            if (getattr(self, "_camada", None) is None
+                    or self._camada.get_size() != (larg, alt)):
+                self._camada = pygame.Surface((larg, alt), pygame.SRCALPHA)
+            self._camada.fill((0, 0, 0, 0))
+            # a camada e desenhada com o Pincel deslocado, entao tudo dentro
+            # dela fica RELATIVO a (x0, y0) -- e por isso ela pode ser colada
+            # noutra posicao no quadro seguinte sem distorcer a pose
+            self.montar(Pincel(self._camada, 1, x0, y0), holding_ball)
+            self._camada_chave = chave
+            self._camada_t = self.anim_t
+        surface.blit(self._camada, (x0, y0))
 
     def montar(self, d, holding_ball):
         f = self.facing
@@ -4276,6 +4323,9 @@ class Game:
         self.player.vestir(ROSTER[0])
         self.rival.vestir(ROSTER[1])
         self.aplicar_quadra()
+        # custo medido do desenho e o mostrador do F3: ver `main`
+        self.custo_ms = 0.0
+        self.mostrar_fps = False
 
     # ---------------- persistência ----------------
     def load_high_score(self):
@@ -4505,6 +4555,9 @@ class Game:
             if ev.key == pygame.K_m:
                 SOM.alternar_mudo()
                 return
+            if ev.key == pygame.K_F3:
+                self.mostrar_fps = not self.mostrar_fps
+                return
             if ev.key in (pygame.K_F11, pygame.K_f):
                 # o estado não é guardado no Game: o R recria o Game inteiro, e
                 # uma cópia da flag dessincronizaria da janela de verdade
@@ -4604,6 +4657,36 @@ class Game:
         """Troca o cenário: fundo, alambrado e o público que combina com ele."""
         self.bg, self.grade, _ = cenario(self.quadra)
         self.crowd = Crowd(self.quadra)
+        # a imagem composta é do cenário ANTIGO: jogar fora, não remendar
+        self._cenario = None
+        self._cenario_t = -999
+
+    # De quantos em quantos quadros o cenário é recomposto no navegador. Só
+    # lá: no PC o gargalo é pixel, e recompor custa mais do que desenhar a
+    # torcida direto na tela.
+    PASSO_CENARIO = 8
+
+    def _fundo_composto(self):
+        """Fundo, torcida, alambrado e refletor numa imagem OPACA só.
+
+        Eram quatro blits de tela cheia por quadro, três delas com alfa, mais
+        ~400 blits de gente. Viram uma blit sem alfa, e o repinte da torcida
+        passa a valer vários quadros — o que se perde é a oscilação de 1,2 px
+        de quem está a 400 px de distância, atrás de um alambrado."""
+        passo = 2 if self.crowd._festa > 0 else self.PASSO_CENARIO
+        if self._cenario is None or self.crowd.t - self._cenario_t >= passo:
+            if self._cenario is None:
+                self._cenario = pygame.Surface((WIDTH, HEIGHT))
+            self._cenario.blit(self.bg, (0, 0))
+            self.crowd.draw(self._cenario)
+            if self.grade is not None:
+                self._cenario.blit(self.grade, (0, 0))
+            if self.quadra["refletor"]:
+                self._cenario.blit(HOOP_GLOW,
+                                   (RIM_CX - HOOP_GLOW.get_width() // 2,
+                                    RIM_Y - HOOP_GLOW.get_height() // 2))
+            self._cenario_t = self.crowd.t
+        return self._cenario
 
     @property
     def selecting(self):
@@ -6565,15 +6648,21 @@ class Game:
         if self.shake > 0.2:
             offset = (random.uniform(-self.shake, self.shake), random.uniform(-self.shake, self.shake))
 
-        surface.blit(self.bg, offset)
-        self.crowd.draw(surface)
-        if self.grade is not None:
-            # a tela do alambrado vem DEPOIS do público: é o que põe a galera
-            # atrás da grade em vez de na frente dela
-            surface.blit(self.grade, (0, 0))
-        if self.quadra["refletor"]:
-            surface.blit(HOOP_GLOW, (RIM_CX - HOOP_GLOW.get_width() // 2,
-                                     RIM_Y - HOOP_GLOW.get_height() // 2))
+        if NO_NAVEGADOR:
+            # uma blit opaca no lugar de quatro (três delas com alfa): ver
+            # `_fundo_composto`. O tremor passa a sacudir o cenário inteiro.
+            surface.blit(self._fundo_composto(), offset)
+            self.crowd._flashes(surface)
+        else:
+            surface.blit(self.bg, offset)
+            self.crowd.draw(surface)
+            if self.grade is not None:
+                # a tela do alambrado vem DEPOIS do público: é o que põe a
+                # galera atrás da grade em vez de na frente dela
+                surface.blit(self.grade, (0, 0))
+            if self.quadra["refletor"]:
+                surface.blit(HOOP_GLOW, (RIM_CX - HOOP_GLOW.get_width() // 2,
+                                         RIM_Y - HOOP_GLOW.get_height() // 2))
         draw_three_point_label(surface)
         self.draw_hoop(surface)
 
@@ -6601,11 +6690,55 @@ class Game:
         # por último: os botões ficam por cima de tudo, inclusive do véu das
         # telas de menu
         self.toque.desenhar(surface, self.tela)
+        if self.mostrar_fps:
+            self.draw_fps(surface)
+
+    def draw_fps(self, surface):
+        """Custo do desenho e quadros por segundo, no F3.
+
+        Existe por causa do navegador: lá o jogo roda numa máquina que eu não
+        alcanço com cronômetro nenhum, e sem número na tela a conversa sobre
+        desempenho vira adivinhação."""
+        ms = max(0.01, self.custo_ms)
+        txt = "%.1f ms  ~%d fps" % (ms, min(60, int(1000.0 / ms)))
+        img = FONT_TINY.render(txt, True, (220, 226, 240))
+        cx = WIDTH - img.get_width() - 10
+        fundo = pygame.Surface((img.get_width() + 10, img.get_height() + 6),
+                               pygame.SRCALPHA)
+        fundo.fill((0, 0, 0, 140))
+        surface.blit(fundo, (cx - 5, 5))
+        surface.blit(img, (cx, 8))
 
 
 # --------------------------------------------------------------------------
 # LOOP PRINCIPAL
 # --------------------------------------------------------------------------
+# Acima disto o quadro já não cabe em 60 fps (16,7 ms), com folga pro resto
+# do laço. É o gatilho do desenho alternado — ver `main`.
+LIMITE_PULO_MS = 24.0
+
+
+def pula_desenho(custo_ms, mirando, navegador=None):
+    """O próximo quadro pode sair sem ser desenhado?
+
+    Três guardas, e nenhuma é detalhe:
+
+      - só no navegador, que é onde o orçamento aperta. Numa máquina que
+        aguenta, nada disso existe;
+      - só acima do custo MEDIDO: alternar o desenho num jogo que já roda a 60
+        fps só tiraria metade dos quadros de graça;
+      - nunca durante a carga do arremesso. A zona verde da barra pode ter UM
+        quadro de largura: desenhar de dois em dois justamente ali
+        transformaria a mira, que é o coração do jogo, em sorteio.
+
+    Está aqui fora, e não numa linha do `while` do `main`, porque o laço
+    principal é a única parte do jogo que a suíte não roda — e uma regra que
+    ninguém consegue interrogar é uma regra que vai apodrecer."""
+    if navegador is None:
+        navegador = NO_NAVEGADOR
+    return bool(navegador) and custo_ms > LIMITE_PULO_MS and not mirando
+
+
 async def main():
     """Laço principal.
 
@@ -6613,19 +6746,42 @@ async def main():
     e lá um `while` comum seguraria a thread e congelaria a página. O
     `await asyncio.sleep(0)` devolve o controle ao navegador a cada quadro.
     Nativamente o efeito é nenhum: asyncio.run() só executa a corrotina — uma
-    fonte de código só para os dois destinos."""
+    fonte de código só para os dois destinos.
+
+    No navegador, se o desenho não couber em 60 fps, a IMAGEM passa a sair de
+    dois em dois quadros e a SIMULAÇÃO continua a 60. A diferença não é
+    detalhe: desenhar a 30 deixa o jogo com menos quadros; simular a 30 deixa
+    ele com outra física — pulo mais curto, bola mais lenta, janela de
+    arremesso mais larga. A primeira perda o jogador aceita, a segunda ele
+    sente como jogo quebrado."""
     game = Game()
+    custo = 0.0          # média móvel do custo do desenho, em ms
+    pulou = False
     while not game.encerrar:
         for ev in pygame.event.get():
             game.handle_event(ev)
 
         keys = game.teclas(pygame.key.get_pressed())
         game.update(keys)
-        game.draw(screen)
+
+        # a zona verde da barra pode ter UM quadro de largura: desenhar de dois
+        # em dois justamente durante a carga transformaria a mira em sorteio
+        mirando = game.player.charging or game.rival.charging
+        if pulou and not mirando:
+            pulou = False
+        else:
+            t0 = time.perf_counter()
+            game.draw(screen)
+            pygame.display.flip()
+            ms = (time.perf_counter() - t0) * 1000.0
+            # média móvel: a troca de quadra e a primeira cesta custam um quadro
+            # caro sozinhas, e isso não é motivo pra passar a partida inteira a 30
+            custo = ms if custo <= 0.0 else custo + (ms - custo) * 0.12
+            pulou = pula_desenho(custo, mirando)
+        game.custo_ms = custo
         # o banco de sons nasce aqui, um por quadro, escondido atrás do menu
         SOM.preparar()
 
-        pygame.display.flip()
         await asyncio.sleep(0)
         clock.tick(FPS)
 
