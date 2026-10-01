@@ -38,7 +38,44 @@ import os
 # --------------------------------------------------------------------------
 # CONFIGURAÇÃO GERAL
 # --------------------------------------------------------------------------
-WIDTH, HEIGHT = 1000, 600
+# A ALTURA é fixa: é dela que saem a altura do aro, o chão e o tamanho do
+# personagem, e mexer nela mudaria o jogo. A LARGURA vem da proporção da
+# janela — num celular deitado o jogo fica mais largo, e o que entra é quadra
+# de trás, que é justamente onde se joga.
+HEIGHT = 600
+LARGURA_PADRAO = 1000
+
+# Limites da largura. Estreito demais e a cesta encosta na linha de três;
+# largo demais e o jogador corre meio minuto até o aro — fora que cada pixel a
+# mais é pixel pra pintar num aparelho que já está no limite.
+LARGURA_MIN, LARGURA_MAX = 1000, 1500
+
+
+def _janela_do_navegador():
+    """Tamanho da janela do navegador, em pixels de CSS, ou None.
+
+    `platform.window` é a porta que o pygbag abre pro JavaScript. Fora do
+    navegador o `platform` é o da biblioteca padrão, que não tem `window`:
+    daí o try largo, e não um teste de plataforma. Se qualquer coisa aqui
+    falhar o jogo abre no tamanho de sempre — jogo que não abre é pior que
+    jogo com barra preta."""
+    try:
+        import platform as _p
+        larg, alt = int(_p.window.innerWidth), int(_p.window.innerHeight)
+        if larg > 200 and alt > 150:
+            return larg, alt
+    except Exception:
+        pass
+    return None
+
+
+_JANELA = _janela_do_navegador() if sys.platform == "emscripten" else None
+if _JANELA:
+    WIDTH = max(LARGURA_MIN, min(LARGURA_MAX,
+                                 int(round(HEIGHT * _JANELA[0] / float(_JANELA[1])))))
+else:
+    WIDTH = LARGURA_PADRAO
+
 FLOOR_Y = 520
 GRAVITY = 0.55
 FPS = 60
@@ -62,11 +99,14 @@ def _pasta_de_dados():
 
 HIGHSCORE_FILE = os.path.join(_pasta_de_dados(), "hoopstars_highscore.json")
 
-THREE_POINT_X = 330       # arremessos com origem à esquerda disso valem 3
+# Medida a partir do aro, como tudo que diz respeito à cesta: assim a
+# distância da linha de três NÃO muda quando a quadra alarga — o que alarga é
+# a quadra de trás, e um arremesso de três continua valendo o mesmo esforço.
+THREE_POINT_X = WIDTH - 670   # origem à esquerda disso vale 3
 # A zona começa na LINHA DE LANCE LIVRE (FT_X ≈ 481, calculado mais abaixo a
 # partir da escala da quadra): colado no aro não sobra espaço pra enterrada
 # acontecer. O tempo do preparo se estica com a distância (ver trigger_dunk).
-DUNK_ZONE = (470, 790)    # faixa de x onde dá pra enterrar
+DUNK_ZONE = (WIDTH - 530, WIDTH - 210)   # faixa de x onde dá pra enterrar
 DUNK_SLAM_FRAMES = 23     # duração do estouro, depois do preparo
 
 # Força do arremesso. A mão fica em y=460 e o aro em y=292, mas o mouse só pode
@@ -97,12 +137,15 @@ DOUBLE_TAP_FRAMES = 18    # janela para a 2ª batida do espaço (enterrada)
 QUICK_TAP_FRAMES = 10     # até aqui o toque conta como "batida", não como carga
 
 # Cesta
-BACKBOARD_X = 862
+# A cesta é medida a partir da DIREITA, não da origem: ela não quer ficar
+# no meio da tela, quer ficar na borda. Com a quadra podendo alargar, number
+# absoluto aqui deixaria o aro boiando no meio do ginásio.
+BACKBOARD_X = WIDTH - 138
 BACKBOARD_TOP = 120
 BACKBOARD_H = 140
 RIM_Y = 262               # 258 px acima do chao, ~1,9x a altura do jogador
-RIM_LEFT = 792
-RIM_RIGHT = 858
+RIM_LEFT = WIDTH - 208
+RIM_RIGHT = WIDTH - 142
 RIM_GRAB_INSET = 28       # onde a mão agarra o aro, contado a partir da borda esquerda
 # nomes dos estilos de enterrada, na ordem de Player.dunk_style
 # Uma cravada por jogador: o dono de cada indice esta ao lado. O JUMPMAN e a
@@ -473,7 +516,20 @@ JANELA = 0 if NO_NAVEGADOR else pygame.SCALED
 # A página estica o canvas de volta pro tamanho da janela, então o jogo ocupa a
 # tela igual — o que muda é a nitidez. E ele já vinha sendo esticado (1000 px
 # numa janela de 1350), então a troca é "esticado 1,35x" por "esticado 1,7x".
-ESCALA_TELA = 0.8 if NO_NAVEGADOR else 1.0
+#
+# A escala sai da ALTURA REAL da janela, quando o navegador a informa. Eu
+# entregava 480 px de altura pra uma tela que tem ~390: o navegador reduzia
+# de novo, e eu estava pintando 23% de pixel pra jogar fora. Com a escala
+# vinda da janela, o canvas chega do tamanho exato em que vai ser mostrado --
+# encher a tela inteira passa a custar MENOS pixel do que custava a versão
+# com barra preta.
+#
+# Teto em 1.0 porque desenhar acima do tamanho do jogo é trabalho puro sem
+# imagem nova. Piso em 0,45 porque abaixo disso o placar vira borrão.
+if _JANELA:
+    ESCALA_TELA = max(0.45, min(1.0, _JANELA[1] / float(HEIGHT)))
+else:
+    ESCALA_TELA = 0.8 if NO_NAVEGADOR else 1.0
 TELA_W = int(WIDTH * ESCALA_TELA)
 TELA_H = int(HEIGHT * ESCALA_TELA)
 
@@ -2292,7 +2348,9 @@ class Ball:
         self.reset_state()
 
     def reset_state(self):
-        self.x, self.y = 150, FLOOR_Y - 60
+        # a mesma distância do aro de sempre: com a quadra podendo alargar, um
+        # x absoluto poria a bola no fundo do ginásio
+        self.x, self.y = WIDTH - 850, FLOOR_Y - 60
         self.vx, self.vy = 0.0, 0.0
         self.held = True
         self.rotation = 0.0
@@ -2941,7 +2999,7 @@ class Player:
     DRIBBLE_SNAP = 0.6       # <1 = a bola sai da mão com velocidade, sem "grudar"
 
     def __init__(self):
-        self.x = 150
+        self.x = WIDTH - 850
         self.y = FLOOR_Y  # posição dos pés
         self.facing = 1
         self.state = "idle"
@@ -4263,6 +4321,12 @@ class Toque:
     # Numa tela de 5,5" deitada, os 1000 px do jogo cobrem uns 120 mm — então
     # raio 40 dá ~9,6 mm de diâmetro, que é o mínimo recomendado pra alvo de
     # dedo. O antigo R_PEQUENO (34) ficava abaixo disso, e era o do MODO.
+    # FIXOS, e não proporcionais à largura. O canvas é entregue na escala
+    # `altura da janela / 600`, e essa escala não depende da largura: um raio
+    # de 60 vale sempre os mesmos milímetros na tela, numa quadra de 1000 ou
+    # de 1500. Proporcional à largura eles CRESCIAM conforme a tela alargava,
+    # até se encavalarem — foi o que apareceu no primeiro desenho da quadra
+    # larga. ~14 mm de diâmetro num celular deitado.
     R_GRANDE, R_MEDIO, R_PEQUENO = 60, 46, 40
 
     # A área que RESPONDE é maior que a desenhada. Ninguém vê o próprio
@@ -4297,27 +4361,27 @@ class Toque:
         if tela == TELA_JOGO:
             return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
                     (188, 492, self.R_MEDIO, ">", pygame.K_d),
-                    (900, 500, self.R_GRANDE, "AÇÃO", pygame.K_SPACE),
-                    (800, 442, self.R_MEDIO, "CIMA", pygame.K_w),
-                    (780, 540, self.R_PEQUENO, "S", pygame.K_s),
-                    (880, 378, self.R_PEQUENO, "MODO", pygame.K_q))
+                    (WIDTH - 100, 500, self.R_GRANDE, "AÇÃO", pygame.K_SPACE),
+                    (WIDTH - 200, 442, self.R_MEDIO, "CIMA", pygame.K_w),
+                    (WIDTH - 220, 540, self.R_PEQUENO, "S", pygame.K_s),
+                    (WIDTH - 120, 378, self.R_PEQUENO, "MODO", pygame.K_q))
         if tela == TELA_QUADRA:
             return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
                     (188, 492, self.R_MEDIO, ">", pygame.K_d),
-                    (900, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
-                    (800, 442, self.R_MEDIO, "+", pygame.K_w),
-                    (780, 540, self.R_PEQUENO, "\u2212", pygame.K_s),
-                    (880, 378, self.R_PEQUENO, "ROUPA", pygame.K_e))
+                    (WIDTH - 100, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
+                    (WIDTH - 200, 442, self.R_MEDIO, "+", pygame.K_w),
+                    (WIDTH - 220, 540, self.R_PEQUENO, "\u2212", pygame.K_s),
+                    (WIDTH - 120, 378, self.R_PEQUENO, "ROUPA", pygame.K_e))
         if tela == TELA_ESCOLHA:
             return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
                     (188, 492, self.R_MEDIO, ">", pygame.K_d),
-                    (900, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
-                    (800, 442, self.R_MEDIO, "+", pygame.K_w),
-                    (780, 540, self.R_PEQUENO, "\u2212", pygame.K_s))
+                    (WIDTH - 100, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
+                    (WIDTH - 200, 442, self.R_MEDIO, "+", pygame.K_w),
+                    (WIDTH - 220, 540, self.R_PEQUENO, "\u2212", pygame.K_s))
         # tela de início
-        return ((900, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
-                (800, 442, self.R_MEDIO, "^", pygame.K_w),
-                (780, 540, self.R_PEQUENO, "v", pygame.K_s))
+        return ((WIDTH - 100, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
+                (WIDTH - 200, 442, self.R_MEDIO, "^", pygame.K_w),
+                (WIDTH - 220, 540, self.R_PEQUENO, "v", pygame.K_s))
 
     def em(self, tela, x, y):
         """Qual tecla está sob o ponto (x, y)? None se for fora dos botões.
