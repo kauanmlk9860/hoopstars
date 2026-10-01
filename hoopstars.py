@@ -1528,6 +1528,13 @@ class FloatingText:
         surf = self.font.render(self.text, True, self.color)
         surf.set_alpha(int(255 * t))
         rect = surf.get_rect(center=(self.x, self.y))
+        # encosta na margem em vez de atravessar: o texto nasce centrado na
+        # bola, e uma cesta perto da tabela jogava o nome da habilidade metade
+        # pra fora da tela — justamente a recompensa que ele existe pra mostrar
+        if rect.right > WIDTH - 8:
+            rect.right = WIDTH - 8
+        if rect.left < 8:
+            rect.left = 8
         surface.blit(surf, rect)
 
     @property
@@ -1925,6 +1932,7 @@ class Net:
         self._pronta = None
         self._pronta_parada = False
         self._pronta_flex = None
+        self._idade = 0
         self.parado = True
 
     # ------------------------------------------------------------------ forma
@@ -2121,9 +2129,19 @@ class Net:
                     ap(((az + bz) * 0.5, ax, ay, bx, by))
         return segs
 
+    # De quantos em quantos quadros a rede em MOVIMENTO é redesenhada no
+    # navegador. Parada ela custa uma blit; balançando, 80 linhas por quadro —
+    # 75% a mais que o quadro inteiro —, e ela acorda exatamente quando a bola
+    # chega. O tremor a 30 Hz continua lendo como rede balançando.
+    PASSO_MEXENDO = 2 if NO_NAVEGADOR else 1
+
     def draw(self, surface, flex=0.0):
-        if (self._pronta is not None and self.parado and self._pronta_parada
-                and flex == self._pronta_flex):
+        if self._pronta is not None and flex == self._pronta_flex and (
+                # parada: os mesmos pixels, não é aproximação nenhuma
+                (self.parado and self._pronta_parada)
+                # balançando: o desenho vale alguns quadros
+                or self._idade < self.PASSO_MEXENDO):
+            self._idade += 1
             surface.blit(self._pronta, self.CAIXA.topleft)
             return
         segs = self._ligacoes(flex)
@@ -2148,6 +2166,7 @@ class Net:
                         pygame.transform.smoothscale(tela, self.CAIXA.size))
         self._pronta_parada = self.parado
         self._pronta_flex = flex
+        self._idade = 1
         surface.blit(self._pronta, self.CAIXA.topleft)
 
 
@@ -3548,7 +3567,11 @@ class Player:
     # No arremesso e na cravada a pose É a informação (o braço estendendo, o
     # pulso quebrando), e aí volta pra dois.
     PASSO_CAMADA = 7
-    PASSO_CAMADA_ACAO = 2
+    # Três e não dois: dois é um pico de 3,5x no item mais caro do quadro,
+    # exatamente no instante em que o jogador está prestando atenção. Três
+    # ainda dão umas dez poses ao longo do arremesso, o braço estendendo
+    # continua legível, e o pico cai 40%.
+    PASSO_CAMADA_ACAO = 3
 
     def pose_chave(self, holding_ball, dy, alt):
         """O que, mudando, exige redesenhar a camada na hora.
@@ -4237,7 +4260,16 @@ class Toque:
     conseguir jogar.
     """
 
-    R_GRANDE, R_MEDIO, R_PEQUENO = 54, 40, 34
+    # Numa tela de 5,5" deitada, os 1000 px do jogo cobrem uns 120 mm — então
+    # raio 40 dá ~9,6 mm de diâmetro, que é o mínimo recomendado pra alvo de
+    # dedo. O antigo R_PEQUENO (34) ficava abaixo disso, e era o do MODO.
+    R_GRANDE, R_MEDIO, R_PEQUENO = 60, 46, 40
+
+    # A área que RESPONDE é maior que a desenhada. Ninguém vê o próprio
+    # polegar: o dedo tapa o alvo no instante em que encosta, e errar por três
+    # pixels não dá "errei o botão", dá "o jogo não respondeu". Desenhar maior
+    # junto não serve — aí o botão come a quadra.
+    FOLGA_TOQUE = 1.32
 
     def __init__(self):
         # No navegador começa LIGADO porque pode ser celular, e quem está no
@@ -4257,37 +4289,55 @@ class Toque:
         no menu e arremessa em quadra. Botão que mente sobre o que faz é pior
         que botão sem rótulo.
         """
+        # O polegar gira em ARCO a partir do canto de baixo, então os botões da
+        # direita ficam num arco em volta do AÇÃO, que é o pivô da mão. O MODO
+        # estava a meia altura colado na borda: não é "longe", é do outro lado
+        # do arco — e é onde a mão segura o aparelho, o que troca "difícil de
+        # apertar" por "apertado sem querer".
         if tela == TELA_JOGO:
-            return ((70, 470, self.R_MEDIO, "<", pygame.K_a),
-                    (172, 470, self.R_MEDIO, ">", pygame.K_d),
-                    (906, 486, self.R_GRANDE, "AÇÃO", pygame.K_SPACE),
-                    (806, 396, self.R_MEDIO, "CIMA", pygame.K_w),
-                    (796, 516, self.R_PEQUENO, "S", pygame.K_s),
-                    (930, 300, self.R_PEQUENO, "MODO", pygame.K_q))
+            return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
+                    (188, 492, self.R_MEDIO, ">", pygame.K_d),
+                    (900, 500, self.R_GRANDE, "AÇÃO", pygame.K_SPACE),
+                    (800, 442, self.R_MEDIO, "CIMA", pygame.K_w),
+                    (780, 540, self.R_PEQUENO, "S", pygame.K_s),
+                    (880, 378, self.R_PEQUENO, "MODO", pygame.K_q))
         if tela == TELA_QUADRA:
-            return ((70, 470, self.R_MEDIO, "<", pygame.K_a),
-                    (172, 470, self.R_MEDIO, ">", pygame.K_d),
-                    (906, 486, self.R_GRANDE, "OK", pygame.K_SPACE),
-                    (806, 396, self.R_MEDIO, "+", pygame.K_w),
-                    (806, 516, self.R_MEDIO, "\u2212", pygame.K_s),
-                    (930, 300, self.R_PEQUENO, "ROUPA", pygame.K_e))
+            return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
+                    (188, 492, self.R_MEDIO, ">", pygame.K_d),
+                    (900, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
+                    (800, 442, self.R_MEDIO, "+", pygame.K_w),
+                    (780, 540, self.R_PEQUENO, "\u2212", pygame.K_s),
+                    (880, 378, self.R_PEQUENO, "ROUPA", pygame.K_e))
         if tela == TELA_ESCOLHA:
-            return ((70, 470, self.R_MEDIO, "<", pygame.K_a),
-                    (172, 470, self.R_MEDIO, ">", pygame.K_d),
-                    (906, 486, self.R_GRANDE, "OK", pygame.K_SPACE),
-                    (806, 396, self.R_MEDIO, "+", pygame.K_w),
-                    (806, 516, self.R_MEDIO, "\u2212", pygame.K_s))
+            return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
+                    (188, 492, self.R_MEDIO, ">", pygame.K_d),
+                    (900, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
+                    (800, 442, self.R_MEDIO, "+", pygame.K_w),
+                    (780, 540, self.R_PEQUENO, "\u2212", pygame.K_s))
         # tela de início
-        return ((906, 486, self.R_GRANDE, "OK", pygame.K_SPACE),
-                (806, 396, self.R_MEDIO, "^", pygame.K_w),
-                (806, 516, self.R_MEDIO, "v", pygame.K_s))
+        return ((900, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
+                (800, 442, self.R_MEDIO, "^", pygame.K_w),
+                (780, 540, self.R_PEQUENO, "v", pygame.K_s))
 
     def em(self, tela, x, y):
-        """Qual tecla está sob o ponto (x, y)? None se for fora dos botões."""
+        """Qual tecla está sob o ponto (x, y)? None se for fora dos botões.
+
+        A área que responde é maior que a desenhada (`FOLGA_TOQUE`), e quando
+        duas se sobrepõem ganha a MAIS PRÓXIMA — medida em raios, pra que o
+        botão grande não engula os vizinhos só por ser grande. Ficar com a
+        primeira da lista daria a vizinhança inteira pro botão que por acaso
+        foi escrito antes, e aí o jogador aprenderia que "ali do lado do AÇÃO
+        não adianta mirar"."""
+        melhor, perto = None, None
         for bx, by, r, _, k in self.layout(tela):
-            if (x - bx) ** 2 + (y - by) ** 2 <= r * r:
-                return k
-        return None
+            alcance = r * self.FOLGA_TOQUE
+            d2 = (x - bx) ** 2 + (y - by) ** 2
+            if d2 > alcance * alcance:
+                continue
+            quanto = d2 / (alcance * alcance)
+            if perto is None or quanto < perto:
+                melhor, perto = k, quanto
+        return melhor
 
     def desenhar(self, surface, tela):
         """Os botões, cada um uma imagem pronta.
@@ -4314,10 +4364,14 @@ class Toque:
         lado = r * 2 + 4
         camada = pygame.Surface((lado, lado), pygame.SRCALPHA)
         c = (r + 2, r + 2)
-        pygame.draw.circle(camada, (250, 250, 255, 70) if premido
-                           else (14, 16, 26, 120), c, r)
-        pygame.draw.circle(camada, (255, 255, 255, 190) if premido
-                           else (210, 212, 228, 110), c, r, 2)
+        # O que se acha num botão é o ANEL, não o disco. Então o anel vem
+        # forte e grosso e o miolo quase transparente: os botões ficam no canto
+        # por onde o polegar alcança, que é justamente onde o jogador 2 joga, e
+        # disco opaco ali esconde a cesta.
+        pygame.draw.circle(camada, (250, 250, 255, 80) if premido
+                           else (8, 10, 18, 92), c, r)
+        pygame.draw.circle(camada, (255, 255, 255, 215) if premido
+                           else (231, 234, 248, 175), c, r, 4)
         cor = WHITE if premido else (218, 220, 234)
         seta = {"<": (-1, 0), ">": (1, 0), "^": (0, -1), "v": (0, 1)}.get(rot)
         if seta is not None:
@@ -4432,6 +4486,9 @@ class Game:
         # custo medido do desenho e o mostrador do F3: ver `main`
         self.custo_ms = 0.0
         self.mostrar_fps = False
+        # este passo de simulação vai virar imagem? Só o `main` diz que não,
+        # quando precisa de vários passos pra alcançar o relógio.
+        self.passo_visivel = True
 
     # ---------------- persistência ----------------
     def load_high_score(self):
@@ -6140,7 +6197,13 @@ class Game:
             b.vx *= 0.88
 
         for quem in (self.player, self.rival):
-            if quem.charging:
+            # a barra anda por quadro DESENHADO. Num aparelho que precisa de
+            # dois ou três passos de simulação por desenho, andar por passo
+            # faria a barra pular posições que o jogador nunca viu — e a zona
+            # verde pode ter um quadro de largura. `passo_visivel` é True por
+            # padrão, então quem chama `update` direto (a suíte inteira) não
+            # vê diferença nenhuma.
+            if quem.charging and self.passo_visivel:
                 quem.charge += 1
             if quem.pending_shot_timer > 0:
                 quem.pending_shot_timer -= 1
@@ -6859,30 +6922,31 @@ PASSO_SIM = 1.0 / FPS
 MAX_PASSOS = 5
 
 
-def passos_devidos(atraso, carregando, max_passos=MAX_PASSOS):
+def passos_devidos(atraso, max_passos=MAX_PASSOS):
     """Quantos passos de simulação o relógio está devendo, e o que sobra.
 
     Devolve (passos, atraso restante). O resto fica pro próximo quadro: é ele
     que faz meio passo sobrando não virar meio passo perdido, que é como um
     jogo ganha aquele arrasto de um quadro a cada tantos.
 
-    Durante a carga do arremesso o teto cai pra UM. A zona verde da barra pode
-    ter um quadro de largura: dois passos entre dois desenhos a tornariam
-    impossível de acertar, e aí a mira — que é o coração do jogo — viraria
-    sorteio. Ali o jogo prefere ficar devagar a ficar injusto.
-
     Quando o teto segura, o atraso sobrando é JOGADO FORA. Guardá-lo faria
     dívida que não se paga: a máquina que não deu conta deste quadro também não
     vai dar do próximo, e a sobra só cresceria até o jogo virar um salto.
 
+    Aqui havia um teto de UM passo enquanto o jogador carregava o arremesso,
+    pra barra não pular posições entre dois desenhos. Protegia a mira e
+    custava caro: o jogo inteiro entrava em câmera lenta justo no momento em
+    que o jogador está prestando atenção. A proteção mudou de lugar — quem
+    anda por desenho agora é só o medidor (ver `Game.update`), e a física
+    alcança o relógio sempre.
+
     Está aqui fora, e não numa linha do `while` do `main`, porque o laço
     principal é a única parte do jogo que a suíte não roda — e regra que
     ninguém consegue interrogar é regra que vai apodrecer."""
-    teto = 1 if carregando else max_passos
     passos = int(atraso / PASSO_SIM)
-    if passos <= teto:
+    if passos <= max_passos:
         return passos, atraso - passos * PASSO_SIM
-    return teto, 0.0
+    return max_passos, 0.0
 
 
 async def main():
@@ -6912,9 +6976,13 @@ async def main():
         agora = time.perf_counter()
         atraso += agora - relogio
         relogio = agora
-        passos, atraso = passos_devidos(
-            atraso, game.player.charging or game.rival.charging)
-        for _ in range(passos):
+        passos, atraso = passos_devidos(atraso)
+        for i in range(passos):
+            # o medidor de arremesso anda UMA vez por quadro desenhado, e não
+            # uma por passo de simulação: ele é um teste de reflexo contra o
+            # que se VÊ. Os outros passos acontecem inteiros — é a física
+            # alcançando o relógio.
+            game.passo_visivel = (i == passos - 1)
             game.update(keys)
 
         # desenha a não ser que o relógio esteja claramente adiantado. A meia
