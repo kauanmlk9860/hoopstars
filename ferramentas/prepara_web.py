@@ -101,6 +101,32 @@ self.addEventListener("fetch", (ev) => {
 });
 """
 
+ESTILO = """
+    <style>
+    /* O jogo é 5:3. Numa janela mais larga que isso sempre vai sobrar faixa
+     * dos lados -- esticar pra preencher deformaria a quadra e desalinharia o
+     * clique do arremesso, porque o pygbag mapeia o ponteiro pela caixa do
+     * canvas. O que dá pra consertar é a COR: o padrão do template é um cinza
+     * de página de erro, que emoldura o jogo. No escuro a faixa some e lê como
+     * letterbox de cinema em vez de borda.
+     *
+     * Para não sobrar faixa nenhuma: F11 tira a barra do navegador, e
+     * instalado como aplicativo (o manifesto pede `fullscreen`) ele já abre
+     * assim. */
+    html, body {
+        background: #0b0818 !important;
+        margin: 0; padding: 0; height: 100%; overflow: hidden;
+    }
+    canvas.emscripten, canvas#canvas {
+        background: #0b0818 !important;
+        border: 0 !important;
+        outline: none;
+    }
+    /* o template desenha uma moldura de 1px em volta da área do jogo */
+    div.emscripten_border, div.thick_border { border: 0 !important; }
+    </style>
+"""
+
 REGISTRO = """
     // service worker NOSSO, deste mesmo endereço. O que o pygbag registrava
     // aqui era um arquivo de outro domínio (que o navegador recusa) e que
@@ -269,7 +295,10 @@ def prepara(pasta):
         '    <link rel="manifest" href="manifest.json">\n'
         '    <meta name="theme-color" content="%s">\n'
         '    <meta name="mobile-web-app-capable" content="yes">\n'
-        '    <link rel="apple-touch-icon" href="icone-192.png">' % (NOME, TEMA))
+        '    <link rel="apple-touch-icon" href="icone-192.png">' % (NOME, TEMA)
+        # o ESTILO entra DEPOIS do %: ele tem "height: 100%" dentro, e um "%"
+        # solto num molde de formatação é erro de sintaxe, não CSS
+        + ESTILO.rstrip())
     html = emenda(html, velho_titulo, novo_titulo, "título e manifesto")
 
     io.open(idx, "w", encoding="utf-8").write(html)

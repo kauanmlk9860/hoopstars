@@ -53,6 +53,9 @@ tabela.
 OUTRAS TECLAS
 -------------
   F11 (ou F) .... tela cheia
+  F11 no navegador tira a barra do Chrome; instalado como aplicativo
+  (menu > Instalar pagina como aplicativo) ele ja abre sem ela.
+
   F3 ............ mostra o custo do quadro (pra saber se o jogo esta
                   lento na sua maquina, ou so parece)
   P ............. pausa

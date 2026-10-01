@@ -15,7 +15,7 @@
  * precisa ter o interpretador no cache normal dele. Offline garantido so
  * trazendo os 13 MB pra ca, que e outra conversa.
  */
-const COFRE = "hoopstars-98920";
+const COFRE = "hoopstars-99961";
 const NOSSOS = ["./", "index.html", "browserfs.min.js", "manifest.json", "icone-192.png", "icone-512.png", "hoopstars_web.apk", "hoopstars_web.tar.gz", "favicon.png"];
 
 self.addEventListener("install", (ev) => {

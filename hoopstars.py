@@ -461,13 +461,34 @@ pygame.display.set_caption("Hoop Stars — Basquete 2D")
 # do mouse, que o pygame traduz de volta. Sem essa bandeira, tela cheia
 # esticaria a imagem e o clique do arremesso cairia deslocado.
 JANELA = 0 if NO_NAVEGADOR else pygame.SCALED
+
+# O jogo é SEMPRE desenhado em WIDTH x HEIGHT. Isto é o tamanho em que ele é
+# ENTREGUE à tela, e só encolhe no navegador.
+#
+# Lá, sem aceleração de vídeo, cada quadro vai pro canvas como um putImageData
+# de 1000x600x4 = 2,4 MB, em JavaScript, sessenta vezes por segundo. Esse custo
+# é área pura: não muda se o quadro está vazio ou cheio, e nenhuma otimização
+# de desenho encosta nele. A 0,8 são 36% menos bytes por quadro.
+#
+# A página estica o canvas de volta pro tamanho da janela, então o jogo ocupa a
+# tela igual — o que muda é a nitidez. E ele já vinha sendo esticado (1000 px
+# numa janela de 1350), então a troca é "esticado 1,35x" por "esticado 1,7x".
+ESCALA_TELA = 0.8 if NO_NAVEGADOR else 1.0
+TELA_W = int(WIDTH * ESCALA_TELA)
+TELA_H = int(HEIGHT * ESCALA_TELA)
+
 try:
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), JANELA)
+    screen = pygame.display.set_mode((TELA_W, TELA_H), JANELA)
 except Exception:
     # SCALED precisa de um renderizador; numa máquina sem ele, abrir em janela
     # comum é melhor que não abrir. Perde-se a tela cheia, não o jogo.
     JANELA = 0
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = pygame.display.set_mode((TELA_W, TELA_H))
+
+# Onde o jogo desenha. Em tamanho natural é a própria tela — nada de cópia
+# extra no PC. Reduzido, é uma superfície à parte que vira a tela uma vez por
+# quadro.
+QUADRO = screen if ESCALA_TELA == 1.0 else pygame.Surface((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
 
 
@@ -3513,14 +3534,20 @@ class Player:
     # De quantos em quantos quadros a camada do personagem é refeita no
     # navegador. Só lá: no PC o caminho supersampleado cabe no orçamento.
     #
-    # Cinco quadros são 12 Hz — que é a taxa em que o desenho 2D sempre animou
-    # membro, e lê como animação, não como engasgo. O que não pode cair pra 12
-    # é a POSIÇÃO, e ela continua a 60: a camada é colada na coordenada atual
-    # a cada quadro.
+    # Sete quadros são 8,5 Hz — dentro da faixa em que o desenho 2D sempre
+    # animou membro (8 a 12), e lê como animação, não como engasgo. O que não
+    # pode cair pra 8,5 é a POSIÇÃO, e ela continua a 60: a camada é colada na
+    # coordenada atual a cada quadro.
+    #
+    # Cheguei a escrever uma "assinatura de pose" pra pular o repinte quando o
+    # boneco está parado de verdade, o que seria de graça em qualidade. Joguei
+    # fora: ela é uma APOSTA sobre quais valores contínuos mexem na pose, e
+    # esquecer um congelaria o personagem sem erro nenhum — um modo de falhar
+    # novo, em troca de ganho menor do que esta linha.
     #
     # No arremesso e na cravada a pose É a informação (o braço estendendo, o
     # pulso quebrando), e aí volta pra dois.
-    PASSO_CAMADA = 5
+    PASSO_CAMADA = 7
     PASSO_CAMADA_ACAO = 2
 
     def pose_chave(self, holding_ball, dy, alt):
@@ -4518,6 +4545,21 @@ class Game:
         """O teclado de verdade somado ao que está sob o dedo."""
         return TeclasToque(reais, self.toque.seguradas)
 
+    def ponto(self, pos):
+        """Coordenada de TELA vira coordenada de QUADRA.
+
+        O ponteiro chega no tamanho em que o jogo é apresentado; todo o resto
+        do código pensa em 1000x600. Sem esta conversão o botão de arremesso
+        responderia fora do lugar, e errado de um jeito que piora conforme se
+        afasta da origem — o jogador sentiria como "o jogo não obedece" sem
+        conseguir dizer por quê.
+
+        O toque de dedo não passa por aqui: ele chega normalizado de 0 a 1 e já
+        é multiplicado pela largura do jogo."""
+        if ESCALA_TELA == 1.0:
+            return pos
+        return (pos[0] / ESCALA_TELA, pos[1] / ESCALA_TELA)
+
     def toque_aperta(self, dedo, x, y):
         """Um dedo pousou em (x, y): se caiu num botão, segura a tecla dele."""
         k = self.toque.em(self.tela, x, y)
@@ -4587,7 +4629,7 @@ class Game:
         if not self.toque.ativo:
             return False
         if t == pygame.MOUSEBUTTONDOWN:
-            return self.toque_aperta(("m", ev.button), *ev.pos)
+            return self.toque_aperta(("m", ev.button), *self.ponto(ev.pos))
         if t == pygame.MOUSEBUTTONUP:
             dedo = ("m", ev.button)
             if dedo in self.toque.dedos:
@@ -4596,7 +4638,7 @@ class Game:
         if t == pygame.MOUSEMOTION and self.toque.dedos:
             for dedo in list(self.toque.dedos):
                 if dedo[0] == "m":
-                    self.toque_arrasta(dedo, *ev.pos)
+                    self.toque_arrasta(dedo, *self.ponto(ev.pos))
             return True
         return False
 
@@ -4710,7 +4752,7 @@ class Game:
             return
 
         if ev.type == pygame.MOUSEBUTTONDOWN and self.ball.held:
-            mx, my = ev.pos
+            mx, my = self.ponto(ev.pos)
             hx, hy = self.player.hand_pos()
             bx, by = self.player.ball_pos()   # clica na bola, que quicando desce
             if math.hypot(mx - bx, my - by) < 70:
@@ -4720,7 +4762,7 @@ class Game:
                 self.drag_current = (mx, my)
 
         elif ev.type == pygame.MOUSEMOTION and self.aiming:
-            self.drag_current = ev.pos
+            self.drag_current = self.ponto(ev.pos)
 
         elif ev.type == pygame.MOUSEBUTTONUP and self.aiming:
             self.release_shot()
@@ -6882,7 +6924,13 @@ async def main():
         # dos 60 desenhar alternadamente 0 e 2 passos — ou seja, 30 quadros.
         if passos or atraso >= PASSO_SIM * 0.5:
             t0 = time.perf_counter()
-            game.draw(screen)
+            game.draw(QUADRO)
+            if QUADRO is not screen:
+                # uma redução em C, uma vez por quadro, pra entregar 36% menos
+                # bytes ao navegador. `scale` e não `smoothscale`: o canvas vai
+                # esticar de volta de qualquer jeito, e suavizar aqui pra
+                # esticar depois é pagar duas vezes pela mesma borda.
+                pygame.transform.scale(QUADRO, (TELA_W, TELA_H), screen)
             pygame.display.flip()
             ms = (time.perf_counter() - t0) * 1000.0
             # média móvel: a troca de quadra e a primeira cesta custam um quadro
