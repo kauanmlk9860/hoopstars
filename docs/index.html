@@ -178,7 +178,11 @@ function show_infobox() {
 
 </script>
 
-    <title>hoopstars_web</title>
+    <title>Hoop Stars</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1a1430">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="icone-192.png">
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -277,8 +281,12 @@ function show_infobox() {
 
     <script>
 /*
-        if (navigator.serviceWorker)
-            navigator.serviceWorker.register("https://pygame-web.github.io/cdn/0.9.3/pygbag0.9.3.js")
+
+    // service worker NOSSO, deste mesmo endereço. O que o pygbag registrava
+    // aqui era um arquivo de outro domínio (que o navegador recusa) e que
+    // ainda por cima dava 404 — ou seja, não havia service worker nenhum.
+    if (navigator.serviceWorker)
+        navigator.serviceWorker.register("sw.js")
         else
             console.warn("Service workers not supported")
 */

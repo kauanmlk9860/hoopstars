@@ -5,6 +5,12 @@ Jogo de basquete 1 contra 1, em Python e pygame, num arquivo só.
 **▶ [Jogar no navegador](https://kauanmlk9860.github.io/hoopstars/)** — funciona
 em PC, Chromebook, celular e tablet. Nada para instalar.
 
+No **Chromebook** (ou em qualquer Chrome) dá para instalar como aplicativo: abra
+o link e clique no ícone de instalar na barra de endereço, ou menu ⋮ →
+*Transmitir, salvar e compartilhar* → *Instalar página como aplicativo*. Ele
+ganha ícone na prateleira e abre em janela própria, em tela cheia, sem barra de
+endereço.
+
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![pygame](https://img.shields.io/badge/pygame-2.6-green)
 ![WebAssembly](https://img.shields.io/badge/roda%20no-navegador-orange)
@@ -56,7 +62,7 @@ direção para arrancar.
 
 **Sem a bola:** cima dá toco · 1× ação é bote de roubo.
 
-`F11` tela cheia · `P` pausa · `M` som · `R` revanche · `ESC` volta.
+`F11` tela cheia · `F3` custo do quadro · `P` pausa · `M` som · `R` revanche · `ESC` volta.
 
 No celular os botões aparecem na tela; eles somem sozinhos assim que você
 apertar uma tecla.
@@ -68,6 +74,20 @@ pip install pygame
 python hoopstars.py
 ```
 
+## Publicar a versão web
+
+```bash
+pygbag --build --ume_block 0 --template default.tmpl hoopstars_web
+python ferramentas/prepara_web.py hoopstars_web/build/web
+```
+
+O segundo passo não é opcional e precisa rodar **depois de cada build**: o
+pygbag regenera o `index.html` toda vez, e é nele que estão o conserto do
+`browserfs.min.js` (o CDN dele aponta para um arquivo que dá 404), o service
+worker próprio (o que vinha era de outro domínio, o que o navegador recusa) e o
+manifesto que faz o Chrome oferecer "Instalar". O ícone é desenhado com a arte
+do próprio jogo — a mesma função que desenha a bola em quadra.
+
 ## Como foi feito
 
 Um arquivo, ~6.600 linhas, sem imagens nem sons externos: personagens, quadra,
@@ -75,11 +95,24 @@ público e efeitos são todos desenhados por código, e o áudio é sintetizado 
 abertura. Isso é o que permite o mesmo arquivo virar executável, página web e
 jogo de celular sem nenhuma pasta de recursos junto.
 
-O projeto tem uma suíte de 15 testes de regressão que mede o jogo em vez de
+A simulação anda pelo **relógio**, não por quadro desenhado: um passo é sempre
+1/60 de segundo e o laço simula quantos couberem no tempo que passou de verdade.
+Num aparelho fraco isso é a diferença entre um jogo com menos quadros e um jogo
+em câmera lenta — pulo durando três vezes mais, bola subindo devagar. O primeiro
+o jogador perdoa; o segundo ele sente como jogo quebrado.
+
+No navegador o custo é por *chamada* ao pygame, não por pixel: cada uma atravessa
+a ponte Python→WebAssembly. Por isso o que roda lá guarda desenho em vez de
+baixar resolução — a torcida parada é uma imagem só, a rede imóvel reaproveita o
+próprio desenho, e os bonecos viram camadas recoladas a cada quadro na posição
+atual. São 1189 chamadas por quadro na primeira versão web contra ~110 hoje.
+
+O projeto tem uma suíte de 18 testes de regressão que mede o jogo em vez de
 inspecionar o código — taxas de acerto por distância e por jogador, partidas
-completas contra a IA, custo por quadro, alcance da mão no aro. Foi ela que
-pegou, por exemplo, que a habilidade do Curry tinha parado de valer depois de
-uma mudança na conta do arremesso.
+completas contra a IA, custo por quadro, alcance da mão no aro, e o laço
+principal rodando contra o relógio de parede. Foi ela que pegou, por exemplo,
+que a habilidade do Curry tinha parado de valer depois de uma mudança na conta
+do arremesso.
 
 ---
 
