@@ -502,10 +502,57 @@ def fonte(nome, tamanho):
     return pygame.font.Font(None, int(tamanho * 1.25))
 
 
-FONT_BIG = fonte("arialblack", 54)
-FONT_MED = fonte("arialblack", 30)
-FONT_SMALL = fonte("arial", 20)
-FONT_TINY = fonte("arial", 15)
+class FonteGuardada:
+    """Uma fonte que lembra o que já desenhou.
+
+    Rasterizar glifo é caro — mais no navegador, onde o Python roda compilado
+    pra WebAssembly —, e o jogo pedia as MESMAS palavras a cada quadro: os
+    nomes dos dois jogadores, o rótulo do placar, o limite da partida. O placar
+    muda umas dez vezes numa partida inteira.
+
+    Embrulho em vez de função nova porque assim nenhum dos 64 lugares que
+    chamam `.render` precisa saber que isto existe.
+
+    O alfa volta a 255 na saída: a imagem é COMPARTILHADA, e o texto que sobe
+    da cesta a escurece a cada quadro pra sumir (`FloatingText`). Sem isto, o
+    primeiro a pedir aquela palavra depois dela receberia um texto meio
+    apagado, e o defeito só apareceria quando as duas coisas dissessem a mesma
+    palavra — que é o tipo de defeito que ninguém encontra.
+
+    255, e não `None`: `set_alpha(None)` não zera o alfa, DESLIGA a mistura —
+    e aí o retângulo inteiro do glifo blita opaco e o placar vira um bloco
+    branco. Foi o que apareceu na tela quando tentei `None` aqui."""
+
+    LIMITE = 400
+
+    def __init__(self, real):
+        self._real = real
+        self._feitos = {}
+
+    def render(self, texto, suave, cor, *resto):
+        if resto:
+            # fundo opaco: raro, e a chave viraria outra — passa direto
+            return self._real.render(texto, suave, cor, *resto)
+        chave = (texto, bool(suave), tuple(cor))
+        img = self._feitos.get(chave)
+        if img is None:
+            if len(self._feitos) >= self.LIMITE:
+                # texto de placar é finito; se encheu, é porque alguém está
+                # desenhando número contínuo. Esvazia em vez de vazar memória.
+                self._feitos.clear()
+            img = self._real.render(texto, suave, cor)
+            self._feitos[chave] = img
+        img.set_alpha(255)
+        return img
+
+    def __getattr__(self, nome):
+        return getattr(self._real, nome)
+
+
+FONT_BIG = FonteGuardada(fonte("arialblack", 54))
+FONT_MED = FonteGuardada(fonte("arialblack", 30))
+FONT_SMALL = FonteGuardada(fonte("arial", 20))
+FONT_TINY = FonteGuardada(fonte("arial", 15))
 
 
 # --------------------------------------------------------------------------
@@ -3463,9 +3510,18 @@ class Player:
     # caixa da cravada em cada quadro de caminhada.
     CAIXA_TOPO_BAIXO = -147
 
-    # De quantos em quantos quadros a camada do personagem e refeita no
-    # navegador. So la: no PC o caminho supersampleado cabe no orcamento.
-    PASSO_CAMADA = 3
+    # De quantos em quantos quadros a camada do personagem é refeita no
+    # navegador. Só lá: no PC o caminho supersampleado cabe no orçamento.
+    #
+    # Cinco quadros são 12 Hz — que é a taxa em que o desenho 2D sempre animou
+    # membro, e lê como animação, não como engasgo. O que não pode cair pra 12
+    # é a POSIÇÃO, e ela continua a 60: a camada é colada na coordenada atual
+    # a cada quadro.
+    #
+    # No arremesso e na cravada a pose É a informação (o braço estendendo, o
+    # pulso quebrando), e aí volta pra dois.
+    PASSO_CAMADA = 5
+    PASSO_CAMADA_ACAO = 2
 
     def pose_chave(self, holding_ball, dy, alt):
         """O que, mudando, exige redesenhar a camada na hora.
@@ -3505,10 +3561,11 @@ class Player:
         y0 = int(self.y - self.jump_offset + dy)
         alt = int(self.y + sobra) - y0
         chave = self.pose_chave(holding_ball, dy, alt)
+        passo = self.PASSO_CAMADA_ACAO if self.action else self.PASSO_CAMADA
         idade = self.anim_t - getattr(self, "_camada_t", -999)
         if (getattr(self, "_camada", None) is None
                 or getattr(self, "_camada_chave", None) != chave
-                or idade >= self.PASSO_CAMADA):
+                or idade >= passo):
             if (getattr(self, "_camada", None) is None
                     or self._camada.get_size() != (larg, alt)):
                 self._camada = pygame.Surface((larg, alt), pygame.SRCALPHA)
@@ -4164,6 +4221,7 @@ class Toque:
         self.ativo = NO_NAVEGADOR
         self.dedos = {}          # id do dedo/botão do mouse -> tecla
         self.seguradas = set()   # teclas seguradas agora
+        self._botoes = {}        # (raio, rótulo, premido) -> imagem pronta
 
     def layout(self, tela):
         """Os botões desta tela: (x, y, raio, rótulo, tecla).
@@ -4205,34 +4263,55 @@ class Toque:
         return None
 
     def desenhar(self, surface, tela):
+        """Os botões, cada um uma imagem pronta.
+
+        Eles não mudam de lugar nem de rótulo, e só têm dois estados: solto e
+        premido. Desenhar os seis do zero a cada quadro custava 28 chamadas ao
+        pygame — mais que o aro e a rede juntos — pra produzir sempre os mesmos
+        dois desenhos de cada botão."""
         if not self.ativo:
             return
         for bx, by, r, rot, k in self.layout(tela):
             premido = k in self.seguradas
-            camada = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
-            c = (r + 2, r + 2)
-            pygame.draw.circle(camada, (250, 250, 255, 70) if premido
-                               else (14, 16, 26, 120), c, r)
-            pygame.draw.circle(camada, (255, 255, 255, 190) if premido
-                               else (210, 212, 228, 110), c, r, 2)
-            surface.blit(camada, (bx - r - 2, by - r - 2))
-            cor = WHITE if premido else (218, 220, 234)
-            seta = {"<": (-1, 0), ">": (1, 0), "^": (0, -1), "v": (0, 1)}.get(rot)
-            if seta is not None:
-                # triângulo DESENHADO, não caractere: num botão de direção a
-                # seta é a informação, e uma fonte sem o glifo a transforma num
-                # quadrado vazio — que foi exatamente o que apareceu na tela
-                dx, dy = seta
-                p = r * 0.44
-                pygame.draw.polygon(surface, cor, [
-                    (bx + dx * p, by + dy * p),
-                    (bx - dx * p * 0.6 - dy * p * 0.9,
-                     by - dy * p * 0.6 - dx * p * 0.9),
-                    (bx - dx * p * 0.6 + dy * p * 0.9,
-                     by - dy * p * 0.6 + dx * p * 0.9)])
-            else:
-                t = FONT_SMALL.render(rot, True, cor)
-                surface.blit(t, (bx - t.get_width() // 2, by - t.get_height() // 2))
+            surface.blit(self._imagem(r, rot, premido), (bx - r - 2, by - r - 2))
+
+    def _imagem(self, r, rot, premido):
+        """O botão desenhado, guardado por (raio, rótulo, premido).
+
+        São seis botões e dois estados: o guarda-tudo enche com uma dúzia de
+        imagens pequenas e para de crescer."""
+        chave = (r, rot, premido)
+        pronta = self._botoes.get(chave)
+        if pronta is not None:
+            return pronta
+        lado = r * 2 + 4
+        camada = pygame.Surface((lado, lado), pygame.SRCALPHA)
+        c = (r + 2, r + 2)
+        pygame.draw.circle(camada, (250, 250, 255, 70) if premido
+                           else (14, 16, 26, 120), c, r)
+        pygame.draw.circle(camada, (255, 255, 255, 190) if premido
+                           else (210, 212, 228, 110), c, r, 2)
+        cor = WHITE if premido else (218, 220, 234)
+        seta = {"<": (-1, 0), ">": (1, 0), "^": (0, -1), "v": (0, 1)}.get(rot)
+        if seta is not None:
+            # triângulo DESENHADO, não caractere: num botão de direção a seta é
+            # a informação, e uma fonte sem o glifo a transforma num quadrado
+            # vazio — que foi exatamente o que apareceu na tela
+            dx, dy = seta
+            p = r * 0.44
+            bx = by = r + 2
+            pygame.draw.polygon(camada, cor, [
+                (bx + dx * p, by + dy * p),
+                (bx - dx * p * 0.6 - dy * p * 0.9,
+                 by - dy * p * 0.6 - dx * p * 0.9),
+                (bx - dx * p * 0.6 + dy * p * 0.9,
+                 by - dy * p * 0.6 + dx * p * 0.9)])
+        else:
+            t = FONT_SMALL.render(rot, True, cor)
+            camada.blit(t, (r + 2 - t.get_width() // 2,
+                            r + 2 - t.get_height() // 2))
+        self._botoes[chave] = camada
+        return camada
 
 
 class Game:
@@ -4660,11 +4739,7 @@ class Game:
         # a imagem composta é do cenário ANTIGO: jogar fora, não remendar
         self._cenario = None
         self._cenario_t = -999
-
-    # De quantos em quantos quadros o cenário é recomposto no navegador. Só
-    # lá: no PC o gargalo é pixel, e recompor custa mais do que desenhar a
-    # torcida direto na tela.
-    PASSO_CENARIO = 8
+        self._cenario_festa = False
 
     def _fundo_composto(self):
         """Fundo, torcida, alambrado e refletor numa imagem OPACA só.
@@ -4673,8 +4748,20 @@ class Game:
         ~400 blits de gente. Viram uma blit sem alfa, e o repinte da torcida
         passa a valer vários quadros — o que se perde é a oscilação de 1,2 px
         de quem está a 400 px de distância, atrás de um alambrado."""
-        passo = 2 if self.crowd._festa > 0 else self.PASSO_CENARIO
-        if self._cenario is None or self.crowd.t - self._cenario_t >= passo:
+        festa = self.crowd._festa > 0
+        if festa:
+            # na comemoração as pessoas pulam de verdade, e aí congelar
+            # apareceria: a imagem é refeita de dois em dois quadros
+            refaz = self.crowd.t - self._cenario_t >= 2
+        else:
+            # parada, a torcida é CENÁRIO, não animação. O balanço é de 1,2 px,
+            # a 400 px de distância, atrás de um alambrado — e custava 48 blits
+            # por quadro pra acontecer. A imagem é feita UMA vez e fica; o
+            # `_cenario_festa` é o que a manda ser refeita quando a festa
+            # acaba, pra galera voltar a sentar.
+            refaz = self._cenario is None or self._cenario_festa
+        if refaz:
+            self._cenario_festa = festa
             if self._cenario is None:
                 self._cenario = pygame.Surface((WIDTH, HEIGHT))
             self._cenario.blit(self.bg, (0, 0))
@@ -6713,30 +6800,47 @@ class Game:
 # --------------------------------------------------------------------------
 # LOOP PRINCIPAL
 # --------------------------------------------------------------------------
-# Acima disto o quadro já não cabe em 60 fps (16,7 ms), com folga pro resto
-# do laço. É o gatilho do desenho alternado — ver `main`.
-LIMITE_PULO_MS = 24.0
+# Um passo de simulação é sempre 1/60 de segundo, desenhe-se ou não. É daqui
+# que sai o jogo correr na mesma velocidade num PC e num celular de entrada.
+PASSO_SIM = 1.0 / FPS
+
+# Quantos passos uma volta do laço pode simular. Sem teto, um engasgo de um
+# segundo viraria 60 passos de uma vez e a bola teleportaria; com teto, o jogo
+# aceita ficar um pouco atrasado em vez de dar um salto.
+#
+# Cinco, e não três, porque três é apertado demais para a máquina que isto
+# existe pra socorrer: com o desenho custando 40 ms, uma volta do laço leva uns
+# 57 e PRECISA de 3,4 passos. O teto em três jogava fora quatro décimos de
+# passo por volta, e o jogo rodava a 80% da velocidade — medido, não estimado
+# (ver t17_laco). Em cinco, o teto só entra num engasgo de verdade, acima de
+# 83 ms, que é quando ficar atrasado passa a ser melhor que dar o salto.
+MAX_PASSOS = 5
 
 
-def pula_desenho(custo_ms, mirando, navegador=None):
-    """O próximo quadro pode sair sem ser desenhado?
+def passos_devidos(atraso, carregando, max_passos=MAX_PASSOS):
+    """Quantos passos de simulação o relógio está devendo, e o que sobra.
 
-    Três guardas, e nenhuma é detalhe:
+    Devolve (passos, atraso restante). O resto fica pro próximo quadro: é ele
+    que faz meio passo sobrando não virar meio passo perdido, que é como um
+    jogo ganha aquele arrasto de um quadro a cada tantos.
 
-      - só no navegador, que é onde o orçamento aperta. Numa máquina que
-        aguenta, nada disso existe;
-      - só acima do custo MEDIDO: alternar o desenho num jogo que já roda a 60
-        fps só tiraria metade dos quadros de graça;
-      - nunca durante a carga do arremesso. A zona verde da barra pode ter UM
-        quadro de largura: desenhar de dois em dois justamente ali
-        transformaria a mira, que é o coração do jogo, em sorteio.
+    Durante a carga do arremesso o teto cai pra UM. A zona verde da barra pode
+    ter um quadro de largura: dois passos entre dois desenhos a tornariam
+    impossível de acertar, e aí a mira — que é o coração do jogo — viraria
+    sorteio. Ali o jogo prefere ficar devagar a ficar injusto.
+
+    Quando o teto segura, o atraso sobrando é JOGADO FORA. Guardá-lo faria
+    dívida que não se paga: a máquina que não deu conta deste quadro também não
+    vai dar do próximo, e a sobra só cresceria até o jogo virar um salto.
 
     Está aqui fora, e não numa linha do `while` do `main`, porque o laço
-    principal é a única parte do jogo que a suíte não roda — e uma regra que
-    ninguém consegue interrogar é uma regra que vai apodrecer."""
-    if navegador is None:
-        navegador = NO_NAVEGADOR
-    return bool(navegador) and custo_ms > LIMITE_PULO_MS and not mirando
+    principal é a única parte do jogo que a suíte não roda — e regra que
+    ninguém consegue interrogar é regra que vai apodrecer."""
+    teto = 1 if carregando else max_passos
+    passos = int(atraso / PASSO_SIM)
+    if passos <= teto:
+        return passos, atraso - passos * PASSO_SIM
+    return teto, 0.0
 
 
 async def main():
@@ -6748,40 +6852,49 @@ async def main():
     Nativamente o efeito é nenhum: asyncio.run() só executa a corrotina — uma
     fonte de código só para os dois destinos.
 
-    No navegador, se o desenho não couber em 60 fps, a IMAGEM passa a sair de
-    dois em dois quadros e a SIMULAÇÃO continua a 60. A diferença não é
-    detalhe: desenhar a 30 deixa o jogo com menos quadros; simular a 30 deixa
-    ele com outra física — pulo mais curto, bola mais lenta, janela de
-    arremesso mais larga. A primeira perda o jogador aceita, a segunda ele
-    sente como jogo quebrado."""
+    A simulação anda pelo RELÓGIO, não por volta do laço: um passo é sempre
+    1/60 de segundo e o laço simula os que couberem no tempo que passou de
+    verdade. Numa máquina que só dá 20 quadros por segundo isso é a diferença
+    entre um jogo com menos quadros e um jogo em CÂMERA LENTA — pulo durando
+    três vezes mais, bola subindo devagar, cronômetro atrasando. O jogador
+    perdoa o primeiro; o segundo ele sente como jogo quebrado."""
     game = Game()
     custo = 0.0          # média móvel do custo do desenho, em ms
-    pulou = False
+    atraso = 0.0         # tempo de jogo que o relógio ainda deve
+    relogio = time.perf_counter()
     while not game.encerrar:
         for ev in pygame.event.get():
             game.handle_event(ev)
-
         keys = game.teclas(pygame.key.get_pressed())
-        game.update(keys)
 
-        # a zona verde da barra pode ter UM quadro de largura: desenhar de dois
-        # em dois justamente durante a carga transformaria a mira em sorteio
-        mirando = game.player.charging or game.rival.charging
-        if pulou and not mirando:
-            pulou = False
-        else:
+        agora = time.perf_counter()
+        atraso += agora - relogio
+        relogio = agora
+        passos, atraso = passos_devidos(
+            atraso, game.player.charging or game.rival.charging)
+        for _ in range(passos):
+            game.update(keys)
+
+        # desenha a não ser que o relógio esteja claramente adiantado. A meia
+        # tolerância não é frescura: com `clock.tick(60)` mirando justamente
+        # 16,7 ms, metade das voltas chega um fio de microssegundo ANTES de
+        # fechar o passo, e exigir `passos > 0` faria uma máquina que dá conta
+        # dos 60 desenhar alternadamente 0 e 2 passos — ou seja, 30 quadros.
+        if passos or atraso >= PASSO_SIM * 0.5:
             t0 = time.perf_counter()
             game.draw(screen)
             pygame.display.flip()
             ms = (time.perf_counter() - t0) * 1000.0
             # média móvel: a troca de quadra e a primeira cesta custam um quadro
-            # caro sozinhas, e isso não é motivo pra passar a partida inteira a 30
+            # caro sozinhas, e um susto não é o regime da máquina
             custo = ms if custo <= 0.0 else custo + (ms - custo) * 0.12
-            pulou = pula_desenho(custo, mirando)
-        game.custo_ms = custo
-        # o banco de sons nasce aqui, um por quadro, escondido atrás do menu
-        SOM.preparar()
+            game.custo_ms = custo
+            # o banco de sons nasce aqui, um por quadro, escondido atrás do menu
+            SOM.preparar()
 
+        # num monitor de 144 Hz o laço roda 144 vezes por segundo e o relógio
+        # só deve 60 passos: as voltas adiantadas saem daqui sem desenhar nada,
+        # em vez de desenhar 144 vezes o que mudou 60
         await asyncio.sleep(0)
         clock.tick(FPS)
 
