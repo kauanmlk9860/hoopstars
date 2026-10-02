@@ -4384,7 +4384,28 @@ class Toque:
         # medidor enche: sobra dedo. De quebra as duas maos ficam com carga
         # parecida, em vez de a direita com quatro botoes e a esquerda com dois.
         "extra":     (270, 360, "R_PEQUENO"),
+        # No canto de CIMA, longe de onde os polegares descansam: a pausa é
+        # botão de errar pouco, não de apertar rápido. E é o único caminho de
+        # volta pro menu que existe no celular, então ele não pode ficar onde
+        # a mão esbarra.
+        "menu":      (74, 62, "R_PEQUENO"),
+        # os dois da tela de fim de partida, grandes e no meio do caminho das
+        # duas mãos: aqui o jogador QUER apertar
+        "refazer":   (-300, 470, "R_GRANDE"),
+        "sair":      (-110, 470, "R_GRANDE"),
     }
+
+    # Vagas que ficam FORA do arco do polegar de propósito. A pausa é o único
+    # caminho de volta pro menu no celular, e largar a partida não pode estar
+    # onde a mão esbarra: aqui, longe é a qualidade, não o defeito. Está
+    # escrito pra o teste de layout saber a diferença entre esta decisão e um
+    # botão que ficou longe por descuido.
+    FORA_DO_ARCO = ("menu",)
+
+    # Painéis que não são telas: o mesmo TELA_JOGO muda de botões conforme a
+    # partida está rolando, pausada ou acabada.
+    PAINEL_PAUSA = "pausa"
+    PAINEL_FIM = "fim"
 
     # Que rótulo e que tecla cada vaga recebe em cada tela. O rótulo muda com a
     # tela porque a tecla muda de sentido: ESPAÇO confirma no menu e arremessa
@@ -4393,7 +4414,8 @@ class Toque:
         TELA_JOGO: (("esq", "<", pygame.K_a), ("dir", ">", pygame.K_d),
                     ("principal", "AÇÃO", pygame.K_SPACE),
                     ("cima", "CIMA", pygame.K_w), ("baixo", "S", pygame.K_s),
-                    ("extra", "MODO", pygame.K_q)),
+                    ("extra", "MODO", pygame.K_q),
+                    ("menu", "II", pygame.K_p)),
         TELA_QUADRA: (("esq", "<", pygame.K_a), ("dir", ">", pygame.K_d),
                       ("principal", "OK", pygame.K_SPACE),
                       ("cima", "+", pygame.K_w),
@@ -4405,6 +4427,10 @@ class Toque:
                        ("baixo", "\u2212", pygame.K_s)),
         TELA_INICIO: (("principal", "OK", pygame.K_SPACE),
                       ("cima", "^", pygame.K_w), ("baixo", "v", pygame.K_s)),
+        PAINEL_PAUSA: (("refazer", "SEGUIR", pygame.K_p),
+                       ("sair", "MENU", pygame.K_ESCAPE)),
+        PAINEL_FIM: (("refazer", "REVANCHE", pygame.K_r),
+                     ("sair", "MENU", pygame.K_ESCAPE)),
     }
 
     def layout(self, tela):
@@ -4419,6 +4445,15 @@ class Toque:
             fora.append((x if x >= 0 else WIDTH + x, y,
                          getattr(self, raio), rotulo, tecla))
         return tuple(fora)
+
+    def vagas_de(self, tela):
+        """Os nomes das vagas deste painel, na mesma ordem do `layout`.
+
+        Existe pro teste de layout poder perguntar QUAL vaga é cada botão — é
+        assim que ele sabe que a pausa está longe do polegar de propósito e não
+        por descuido."""
+        return tuple(v for v, _, _ in self.PAINEIS.get(
+            tela, self.PAINEIS[TELA_INICIO]))
 
     def em(self, tela, x, y):
         """Qual tecla está sob o ponto (x, y)? None se for fora dos botões.
@@ -4718,9 +4753,25 @@ class Game:
             return pos
         return (pos[0] / ESCALA_TELA, pos[1] / ESCALA_TELA)
 
+    @property
+    def painel(self):
+        """Qual conjunto de botões a tela de toque mostra agora.
+
+        Não é a mesma coisa que `self.tela`: o mesmo TELA_JOGO vale pra partida
+        rolando, pausada e acabada, e nos três o jogador precisa de botões
+        diferentes. Acabada, sem isto, ele fica preso olhando o placar — R e
+        ESC são as únicas teclas que servem ali, e nenhuma das duas existe num
+        celular."""
+        if self.tela == TELA_JOGO:
+            if self.game_over:
+                return Toque.PAINEL_FIM
+            if self.pausado:
+                return Toque.PAINEL_PAUSA
+        return self.tela
+
     def toque_aperta(self, dedo, x, y):
         """Um dedo pousou em (x, y): se caiu num botão, segura a tecla dele."""
-        k = self.toque.em(self.tela, x, y)
+        k = self.toque.em(self.painel, x, y)
         if k is None:
             return False
         self.toque.dedos[dedo] = k
@@ -4828,7 +4879,8 @@ class Game:
                 else:
                     self.reset_round()
                 return
-            if ev.key == pygame.K_p and self.tela == TELA_JOGO and not self.game_over:
+            if (ev.key == pygame.K_p and self.tela == TELA_JOGO
+                    and not self.game_over):
                 self.pausado = not self.pausado
                 return
             if ev.key == pygame.K_m:
@@ -6886,8 +6938,16 @@ class Game:
                 surface.blit(t, (cx - t.get_width() // 2, y))
 
         # ---------------- saídas ----------------
-        dica = FONT_SMALL.render("R  revanche        ESC  menu        M  som",
-                                 True, (216, 216, 228))
+        if self.toque.ativo:
+            # quem está no celular não tem R, nem ESC, nem M: listar teclas
+            # que ele não possui é pior que não dizer nada, porque parece que
+            # a saída existe em algum lugar que ele não está achando
+            dica = FONT_SMALL.render("toque em REVANCHE pra jogar de novo, "
+                                     "MENU pra sair", True, (216, 216, 228))
+        else:
+            dica = FONT_SMALL.render(
+                "R  revanche        ESC  menu        M  som",
+                True, (216, 216, 228))
         surface.blit(dica, (WIDTH // 2 - dica.get_width() // 2, 500))
         detalhe = FONT_TINY.render(
             "revanche mantém a mesma dupla, a mesma quadra e a mesma dificuldade",
@@ -6931,6 +6991,11 @@ class Game:
         dica = FONT_SMALL.render("P  continua        R  revanche        "
                                  "ESC  menu        M  som        F11  tela cheia",
                                  True, (216, 216, 228))
+        if self.toque.ativo:
+            # quem está no celular não tem nenhuma dessas teclas: os botões na
+            # tela é que são a resposta, e a linha acima só confundiria
+            dica = FONT_SMALL.render("toque em SEGUIR pra continuar, "
+                                     "MENU pra sair", True, (216, 216, 228))
         surface.blit(dica, (WIDTH // 2 - dica.get_width() // 2, 310))
         if SOM.mudo:
             m = FONT_TINY.render("som desligado", True, (150, 152, 166))
@@ -6982,7 +7047,7 @@ class Game:
             self.draw_hud(surface)
         # por último: os botões ficam por cima de tudo, inclusive do véu das
         # telas de menu
-        self.toque.desenhar(surface, self.tela)
+        self.toque.desenhar(surface, self.painel)
         if self.mostrar_fps:
             self.draw_fps(surface)
 

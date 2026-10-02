@@ -58,6 +58,10 @@ OUTRAS TECLAS
 
   NO CELULAR: deite o aparelho. A quadra se ajusta a proporcao da tela,
   entao nao sobra barra preta. Os botoes ficam nos cantos de baixo.
+  O botao II, no canto de CIMA a esquerda, pausa - e e por ele que se
+  volta ao menu no meio de uma partida. Fica longe do polegar de
+  proposito: largar a partida nao pode estar onde a mao esbarra.
+  Acabada a partida aparecem REVANCHE e MENU.
 
   F3 ............ mostra o custo do quadro (pra saber se o jogo esta
                   lento na sua maquina, ou so parece)
