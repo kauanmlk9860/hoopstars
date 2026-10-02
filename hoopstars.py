@@ -62,6 +62,13 @@ def _janela_do_navegador():
     try:
         import platform as _p
         larg, alt = int(_p.window.innerWidth), int(_p.window.innerHeight)
+        if alt > larg:
+            # aparelho em pé. O jogo é deitado (o manifesto pede `landscape`),
+            # e quase todo link é aberto em pé e girado depois: o que interessa
+            # é esta mesma janela DEITADA, que são as mesmas medidas trocadas
+            # de lugar. Sem isto o conserto da tela cheia só valeria pra quem
+            # já estivesse deitado na hora de abrir.
+            larg, alt = alt, larg
         if larg > 200 and alt > 150:
             return larg, alt
     except Exception:
@@ -1007,7 +1014,12 @@ def lerp_color(c1, c2, t):
 # O jogo é em visão lateral. A faixa de FLOOR_Y até HEIGHT é o PLANO DO CHÃO:
 # a largura da quadra (lateral a lateral) foge "pra dentro" da tela. Toda a
 # pintura é gerada em coordenadas de quadra e projetada ponto a ponto.
-VP_X = WIDTH / 2          # ponto de fuga
+# Ponto de fuga, medido a partir da DIREITA como todo o resto da quadra: ele
+# tem uma relação fixa com a CESTA, não com a janela. Em WIDTH/2 ele se
+# afastava do aro conforme a tela alargava, e a perspectiva abria as marcações
+# em leque — a quadra aparecia derretida. Em WIDTH-500 dá exatamente o antigo
+# 500 numa quadra de 1000: a pintura é a de sempre, transladada.
+VP_X = WIDTH - 500        # ponto de fuga
 SPREAD = 0.22             # quanto as linhas se abrem ao vir pra frente
 FLOOR_H = HEIGHT - FLOOR_Y
 COURT_SS = 3              # supersampling do piso (desenha em 3x e reduz: antialias)
@@ -1024,7 +1036,7 @@ def floor_point(x, d):
 # frente (d=1), 0 = meio da quadra. LAT_HALF converte px de quadra em "u".
 LAT_HALF = 520.0
 RIM_CX = (RIM_LEFT + RIM_RIGHT) / 2.0     # centro do aro (825)
-BASELINE_X = 878.0                        # linha de fundo, logo à direita do aro
+BASELINE_X = WIDTH - 122.0                # linha de fundo, logo à direita do aro
 M_PX = (RIM_CX - THREE_POINT_X) / 7.24    # px por metro, derivado DA REGRA DO JOGO
 # Raio do arco de 3 escolhido para que o PONTO MAIS DISTANTE do arco caia, já
 # projetado, exatamente em x = THREE_POINT_X — onde a regra dos 3 pontos começa
@@ -1037,7 +1049,7 @@ PAINT_U = 0.40                            # meia-largura do garrafão (em u)
 CORNER_U = 0.84                           # retas de canto da linha de 3
 SIDE_FAR_U = -0.96                        # lateral de trás
 SIDE_NEAR_U = 0.93                        # lateral da frente
-MID_X = 140.0                             # linha de meio-quadra (o resto fica fora)
+MID_X = WIDTH - 860.0                     # linha de meio-quadra (o resto fica fora)
 CENTER_R = 1.80 * M_PX
 
 WOOD_DEEP = (136, 82, 41)
@@ -4323,11 +4335,15 @@ class Toque:
     # dedo. O antigo R_PEQUENO (34) ficava abaixo disso, e era o do MODO.
     # FIXOS, e não proporcionais à largura. O canvas é entregue na escala
     # `altura da janela / 600`, e essa escala não depende da largura: um raio
-    # de 60 vale sempre os mesmos milímetros na tela, numa quadra de 1000 ou
-    # de 1500. Proporcional à largura eles CRESCIAM conforme a tela alargava,
-    # até se encavalarem — foi o que apareceu no primeiro desenho da quadra
-    # larga. ~14 mm de diâmetro num celular deitado.
-    R_GRANDE, R_MEDIO, R_PEQUENO = 60, 46, 40
+    # vale sempre os mesmos milímetros na tela, numa quadra de 1000 ou de
+    # 1500. Proporcional à largura eles CRESCIAM conforme a tela alargava, até
+    # se encavalarem — foi o que apareceu no primeiro desenho da quadra larga.
+    #
+    # ~18 mm de diâmetro no grande, num celular deitado. Eu tinha parado em 13
+    # porque 13 passa do mínimo de 9 que se recomenda — mas o mínimo marca o
+    # limite do aceitável, e quem joga de polegar uma partida inteira quer
+    # folga e não limite.
+    R_GRANDE, R_MEDIO, R_PEQUENO = 78, 60, 54
 
     # A área que RESPONDE é maior que a desenhada. Ninguém vê o próprio
     # polegar: o dedo tapa o alvo no instante em que encosta, e errar por três
@@ -4346,42 +4362,63 @@ class Toque:
         self.seguradas = set()   # teclas seguradas agora
         self._botoes = {}        # (raio, rótulo, premido) -> imagem pronta
 
+    # ONDE os botões ficam, uma vez só. O polegar gira em ARCO a partir do
+    # canto de baixo, então os da direita ficam em volta do botão principal,
+    # que é o pivô da mão, e os da esquerda no canto oposto. O x é medido a
+    # partir da borda de cada lado, porque a quadra pode alargar — e é a borda
+    # que fica debaixo da mão, não a origem.
+    #
+    # Numa tabela e não repetido nas quatro telas: foi essa duplicação que me
+    # fez, mexendo nas posições, ancorar três botões na borda e passar batido
+    # pelos outros. O mesmo ponto escrito em quatro lugares são quatro chances
+    # de esquecer um.
+    VAGAS = {
+        "esq":       (88, 478, "R_MEDIO"),
+        "dir":       (222, 478, "R_MEDIO"),
+        "principal": (-105, 480, "R_GRANDE"),
+        "cima":      (-250, 400, "R_MEDIO"),
+        "baixo":     (-255, 530, "R_PEQUENO"),
+        # Na mao ESQUERDA. Na direita ele caia em cima do aro e da rede --
+        # e justamente onde o jogador precisa enxergar a bola entrar. A
+        # esquerda so tem as setas, e o MODO e apertado uma vez por vez que o
+        # medidor enche: sobra dedo. De quebra as duas maos ficam com carga
+        # parecida, em vez de a direita com quatro botoes e a esquerda com dois.
+        "extra":     (270, 360, "R_PEQUENO"),
+    }
+
+    # Que rótulo e que tecla cada vaga recebe em cada tela. O rótulo muda com a
+    # tela porque a tecla muda de sentido: ESPAÇO confirma no menu e arremessa
+    # em quadra. Botão que mente sobre o que faz é pior que botão sem rótulo.
+    PAINEIS = {
+        TELA_JOGO: (("esq", "<", pygame.K_a), ("dir", ">", pygame.K_d),
+                    ("principal", "AÇÃO", pygame.K_SPACE),
+                    ("cima", "CIMA", pygame.K_w), ("baixo", "S", pygame.K_s),
+                    ("extra", "MODO", pygame.K_q)),
+        TELA_QUADRA: (("esq", "<", pygame.K_a), ("dir", ">", pygame.K_d),
+                      ("principal", "OK", pygame.K_SPACE),
+                      ("cima", "+", pygame.K_w),
+                      ("baixo", "\u2212", pygame.K_s),
+                      ("extra", "ROUPA", pygame.K_e)),
+        TELA_ESCOLHA: (("esq", "<", pygame.K_a), ("dir", ">", pygame.K_d),
+                       ("principal", "OK", pygame.K_SPACE),
+                       ("cima", "+", pygame.K_w),
+                       ("baixo", "\u2212", pygame.K_s)),
+        TELA_INICIO: (("principal", "OK", pygame.K_SPACE),
+                      ("cima", "^", pygame.K_w), ("baixo", "v", pygame.K_s)),
+    }
+
     def layout(self, tela):
         """Os botões desta tela: (x, y, raio, rótulo, tecla).
 
-        O rótulo muda com a tela porque a tecla muda de sentido: ESPAÇO confirma
-        no menu e arremessa em quadra. Botão que mente sobre o que faz é pior
-        que botão sem rótulo.
-        """
-        # O polegar gira em ARCO a partir do canto de baixo, então os botões da
-        # direita ficam num arco em volta do AÇÃO, que é o pivô da mão. O MODO
-        # estava a meia altura colado na borda: não é "longe", é do outro lado
-        # do arco — e é onde a mão segura o aparelho, o que troca "difícil de
-        # apertar" por "apertado sem querer".
-        if tela == TELA_JOGO:
-            return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
-                    (188, 492, self.R_MEDIO, ">", pygame.K_d),
-                    (WIDTH - 100, 500, self.R_GRANDE, "AÇÃO", pygame.K_SPACE),
-                    (WIDTH - 200, 442, self.R_MEDIO, "CIMA", pygame.K_w),
-                    (WIDTH - 220, 540, self.R_PEQUENO, "S", pygame.K_s),
-                    (WIDTH - 120, 378, self.R_PEQUENO, "MODO", pygame.K_q))
-        if tela == TELA_QUADRA:
-            return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
-                    (188, 492, self.R_MEDIO, ">", pygame.K_d),
-                    (WIDTH - 100, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
-                    (WIDTH - 200, 442, self.R_MEDIO, "+", pygame.K_w),
-                    (WIDTH - 220, 540, self.R_PEQUENO, "\u2212", pygame.K_s),
-                    (WIDTH - 120, 378, self.R_PEQUENO, "ROUPA", pygame.K_e))
-        if tela == TELA_ESCOLHA:
-            return ((74, 492, self.R_MEDIO, "<", pygame.K_a),
-                    (188, 492, self.R_MEDIO, ">", pygame.K_d),
-                    (WIDTH - 100, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
-                    (WIDTH - 200, 442, self.R_MEDIO, "+", pygame.K_w),
-                    (WIDTH - 220, 540, self.R_PEQUENO, "\u2212", pygame.K_s))
-        # tela de início
-        return ((WIDTH - 100, 500, self.R_GRANDE, "OK", pygame.K_SPACE),
-                (WIDTH - 200, 442, self.R_MEDIO, "^", pygame.K_w),
-                (WIDTH - 220, 540, self.R_PEQUENO, "v", pygame.K_s))
+        O x negativo da tabela é medido a partir da DIREITA: é assim que o
+        arranjo da mão continua no canto quando a quadra alarga."""
+        fora = []
+        for vaga, rotulo, tecla in self.PAINEIS.get(tela,
+                                                    self.PAINEIS[TELA_INICIO]):
+            x, y, raio = self.VAGAS[vaga]
+            fora.append((x if x >= 0 else WIDTH + x, y,
+                         getattr(self, raio), rotulo, tecla))
+        return tuple(fora)
 
     def em(self, tela, x, y):
         """Qual tecla está sob o ponto (x, y)? None se for fora dos botões.

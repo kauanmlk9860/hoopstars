@@ -5,11 +5,18 @@ Jogo de basquete 1 contra 1, em Python e pygame, num arquivo só.
 **▶ [Jogar no navegador](https://kauanmlk9860.github.io/hoopstars/)** — funciona
 em PC, Chromebook, celular e tablet. Nada para instalar.
 
-No **Chromebook** (ou em qualquer Chrome) dá para instalar como aplicativo: abra
+**No celular**, abra o link e deite o aparelho. A quadra se ajusta à proporção
+da sua tela: a altura é sempre 600 — é dela que saem o aro, o chão e o tamanho
+do personagem — e a largura vem da janela, então num celular deitado entra mais
+quadra de trás em vez de sobrar barra preta. Os controles de toque aparecem
+sozinhos e somem assim que você encostar numa tecla.
+
+**No Chromebook** (ou em qualquer Chrome) dá para instalar como aplicativo: abra
 o link e clique no ícone de instalar na barra de endereço, ou menu ⋮ →
 *Transmitir, salvar e compartilhar* → *Instalar página como aplicativo*. Ele
 ganha ícone na prateleira e abre em janela própria, em tela cheia, sem barra de
-endereço.
+endereço. No iPhone o equivalente é *Compartilhar* → *Adicionar à Tela de
+Início*.
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![pygame](https://img.shields.io/badge/pygame-2.6-green)
@@ -65,7 +72,9 @@ direção para arrancar.
 `F11` tela cheia · `F3` custo do quadro · `P` pausa · `M` som · `R` revanche · `ESC` volta.
 
 No celular os botões aparecem na tela; eles somem sozinhos assim que você
-apertar uma tecla.
+apertar uma tecla. Eles ficam nos cantos de baixo, por onde o polegar alcança,
+e a área que responde é maior que o círculo desenhado — ninguém vê o próprio
+polegar, e errar por três pixels não pode virar "o jogo não respondeu".
 
 ## Rodar local
 

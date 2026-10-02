@@ -124,8 +124,35 @@ ESTILO = """
     }
     /* o template desenha uma moldura de 1px em volta da área do jogo */
     div.emscripten_border, div.thick_border { border: 0 !important; }
+
+    /* Aviso de girar o aparelho.
+     *
+     * O jogo é deitado, e o tamanho da janela é lido UMA vez na abertura: em
+     * pé ele escolheria a quadra mais estreita e ficaria com barra mesmo
+     * depois de girar. O código já contorna isso trocando as medidas de lugar
+     * quando o aparelho está em pé — isto aqui é a outra metade, dizer ao
+     * jogador o que fazer em vez de deixá-lo jogar de lado.
+     *
+     * `pointer: coarse` junto com `orientation: portrait` pra não aparecer
+     * numa janela de PC só por ela estar estreita: lá girar não é opção. */
+    #gire { display: none; }
+    @media (orientation: portrait) and (pointer: coarse) {
+        #gire {
+            display: flex; position: fixed; inset: 0; z-index: 99999;
+            flex-direction: column; align-items: center; justify-content: center;
+            background: #0b0818; color: #e7eaf8; text-align: center;
+            padding: 24px; gap: 10px;
+            font: 600 20px/1.45 system-ui, -apple-system, sans-serif;
+        }
+        #gire small { font-weight: 400; font-size: 15px; opacity: .72; }
+        #gire b { font-size: 44px; line-height: 1; }
+    }
     </style>
 """
+
+AVISO_GIRE = """
+    <div id="gire"><b>↻</b>Gire o aparelho
+        <small>o Hoop Stars é jogado deitado</small></div>"""
 
 REGISTRO = """
     // service worker NOSSO, deste mesmo endereço. O que o pygbag registrava
@@ -203,11 +230,14 @@ def emenda(html, velho, novo, nome):
 
     O que não se aceita é nenhum dos dois estar lá: aí o template mudou mesmo,
     e seguir em frente publicaria uma página sem o conserto."""
-    if velho in html:
-        return html.replace(velho, novo)
+    # o JÁ-FEITO vem primeiro de propósito: uma das emendas enxerta depois de
+    # `<body>`, e `<body>` continua lá depois de enxertada. Testando o velho
+    # antes, a segunda passada enxertaria de novo.
     if novo in html:
         print("  (%s: já estava feito)" % nome)
         return html
+    if velho in html:
+        return html.replace(velho, novo)
     raise AssertionError(
         "%s: não achei nem a forma antiga nem a nova no index.html — "
         "o template do pygbag mudou e este script precisa ser revisto" % nome)
@@ -300,6 +330,7 @@ def prepara(pasta):
         # solto num molde de formatação é erro de sintaxe, não CSS
         + ESTILO.rstrip())
     html = emenda(html, velho_titulo, novo_titulo, "título e manifesto")
+    html = emenda(html, "<body>", "<body>" + AVISO_GIRE, "aviso de girar")
 
     io.open(idx, "w", encoding="utf-8").write(html)
     print("index.html: título, manifesto e service worker no lugar")
